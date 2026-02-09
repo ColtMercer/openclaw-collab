@@ -1,0 +1,34 @@
+name: Bug report
+description: Report a bug in the dashboard/workflow
+title: "[Bug]: "
+labels: ["type/bug", "status/backlog"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: false
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ..."
+    validations:
+      required: false
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "OS, browser, commit hash"
+    validations:
+      required: false

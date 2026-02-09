@@ -1,0 +1,36 @@
+name: Article request
+description: Request a technical article (draft + review + publish)
+title: "[Article]: "
+labels: ["type/article", "status/backlog"]
+body:
+  - type: input
+    id: audience
+    attributes:
+      label: Audience
+      placeholder: "e.g. intermediate devs, beginners, SREs"
+    validations:
+      required: false
+
+  - type: textarea
+    id: topic
+    attributes:
+      label: Topic
+      description: What should the article teach or argue?
+    validations:
+      required: true
+
+  - type: textarea
+    id: outline
+    attributes:
+      label: Suggested outline
+      placeholder: "- Intro\n- ..."
+    validations:
+      required: false
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Length, style, must-include links, etc.
+    validations:
+      required: false
