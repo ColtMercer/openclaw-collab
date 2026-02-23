@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { githubConfig, githubRepoSlug } from "@/lib/config";
 
 type GitHubLabel = {
@@ -104,6 +106,18 @@ export default async function Home() {
   return (
     <div className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-900">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-8">
+        <nav className="flex items-center justify-between text-sm">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+            Kanban
+          </span>
+          <Link
+            href="/activity"
+            className="text-zinc-600 transition hover:text-zinc-900"
+          >
+            Activity →
+          </Link>
+        </nav>
+
         <header className="flex flex-col gap-2">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
             Open Issues Kanban
