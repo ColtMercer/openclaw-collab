@@ -513,8 +513,8 @@ export function KanbanBoard() {
           {[0, 1].map((item) => (
             <div key={item} className="space-y-3">
               <Skeleton className="h-5 w-40" />
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
-                {[0, 1, 2, 3].map((column) => (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+                {[0, 1, 2, 3, 4].map((column) => (
                   <div
                     key={column}
                     className="rounded-2xl border border-border/50 bg-muted/20 p-3"
@@ -660,6 +660,34 @@ export function KanbanBoard() {
         </div>
       </div>
 
+      {/* Quick blockers summary */}
+      {(() => {
+        const blockedIssues = issues.filter((i) => i.status === "Blocked")
+        if (blockedIssues.length === 0) return null
+        return (
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-950/20 p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-lg">🚫</span>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
+                Pending You ({blockedIssues.length})
+              </h2>
+            </div>
+            <div className="space-y-1.5">
+              {blockedIssues.map((issue) => (
+                <button
+                  key={issue._id}
+                  onClick={() => openIssue(issue)}
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition hover:bg-amber-900/30"
+                >
+                  <span className="text-foreground">{issue.title}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{issue.project}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {projects.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border/60 bg-card/60 p-8 text-center">
           <h2 className="text-lg font-semibold text-foreground">No projects yet</h2>
@@ -685,7 +713,7 @@ export function KanbanBoard() {
                   {issues.filter((issue) => issue.project === project.name).length} issues
                 </span>
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
                 {ISSUE_STATUSES.map((status) => {
                   const filtered = sortIssues(
                     issues.filter(

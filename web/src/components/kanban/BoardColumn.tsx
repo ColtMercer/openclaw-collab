@@ -25,10 +25,18 @@ export function BoardColumn({
   })
 
   return (
-    <div className="flex min-h-[320px] flex-col rounded-2xl border border-border/50 bg-muted/20 p-3">
+    <div className={cn(
+      "flex min-h-[320px] flex-col rounded-2xl border p-3",
+      title === "Blocked"
+        ? "border-amber-500/60 bg-amber-950/20"
+        : "border-border/50 bg-muted/20"
+    )}>
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          {title}
+        <h3 className={cn(
+          "text-sm font-semibold uppercase tracking-wide",
+          title === "Blocked" ? "text-amber-400" : "text-muted-foreground"
+        )}>
+          {title === "Blocked" ? "🚫 Blocked" : title}
         </h3>
         <span className="text-xs text-muted-foreground">{issues.length}</span>
       </div>

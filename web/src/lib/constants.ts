@@ -3,6 +3,7 @@ import type { ArticleStatus, IssuePriority, IssueStatus } from "@/types"
 export const ISSUE_STATUSES: IssueStatus[] = [
   "Backlog",
   "In Progress",
+  "Blocked",
   "Review",
   "Done",
 ]

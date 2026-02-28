@@ -5,7 +5,7 @@ export type Project = {
   createdAt: string
 }
 
-export type IssueStatus = "Backlog" | "In Progress" | "Review" | "Done"
+export type IssueStatus = "Backlog" | "In Progress" | "Blocked" | "Review" | "Done"
 export type IssuePriority = "Low" | "Medium" | "High" | "Critical" | "Urgent"
 
 export type Issue = {
