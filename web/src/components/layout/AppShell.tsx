@@ -13,6 +13,8 @@ import { Toaster } from "sonner"
 const navItems = [
   { href: "/", label: "Kanban" },
   { href: "/articles", label: "Articles" },
+  { href: "/finance", label: "Finance" },
+  { href: "/shopper", label: "Shopper" },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
