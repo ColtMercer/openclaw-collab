@@ -103,7 +103,6 @@ export async function fetchGitHub<T>(
   const response = await fetch(url, {
     ...options,
     headers,
-    // @ts-expect-error Next.js extended fetch option
     next: options.next ?? { revalidate: 300 },
   });
 
