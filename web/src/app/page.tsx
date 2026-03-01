@@ -1,21 +1,6 @@
 import Link from "next/link";
-
-import { githubConfig, githubRepoSlug } from "@/lib/config";
-
-type GitHubLabel = {
-  id: number;
-  name: string;
-  color: string;
-};
-
-type GitHubIssue = {
-  id: number;
-  number: number;
-  title: string;
-  html_url: string;
-  labels: GitHubLabel[];
-  pull_request?: unknown;
-};
+import { repoUrl } from "@/lib/config";
+import { getStatusLabel, listOpenIssues } from "@/lib/github";
 
 const STATUS_COLUMNS = [
   { key: "status/backlog", title: "Backlog" },
@@ -23,193 +8,128 @@ const STATUS_COLUMNS = [
   { key: "status/in-progress", title: "In Progress" },
   { key: "status/review", title: "Review" },
   { key: "status/done", title: "Done" },
-] as const;
-
-const typePriorityPrefix = ["type/", "priority/"];
-
-function normalizeLabelName(label: string) {
-  return label.trim().toLowerCase();
-}
-
-function getStatusKey(labels: GitHubLabel[]) {
-  for (const column of STATUS_COLUMNS) {
-    const match = labels.some(
-      (label) => normalizeLabelName(label.name) === column.key,
-    );
-    if (match) {
-      return column.key;
-    }
-  }
-  return "status/backlog";
-}
-
-function getTypePriorityLabels(labels: GitHubLabel[]) {
-  return labels.filter((label) =>
-    typePriorityPrefix.some((prefix) =>
-      normalizeLabelName(label.name).startsWith(prefix),
-    ),
-  );
-}
-
-async function fetchIssues() {
-  const { owner, repo, token } = githubConfig;
-  const params = new URLSearchParams({
-    state: "open",
-    per_page: "100",
-  });
-
-  const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/issues?${params.toString()}`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      next: { revalidate: 60 },
-    },
-  );
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(
-      `GitHub API error (${response.status}): ${errorBody || "Unknown error"}`,
-    );
-  }
-
-  const data = (await response.json()) as GitHubIssue[];
-  return data.filter((issue) => !issue.pull_request);
-}
+];
 
 export default async function Home() {
-  let issues: GitHubIssue[] = [];
+  let issues = [] as Awaited<ReturnType<typeof listOpenIssues>>;
   let errorMessage: string | null = null;
 
   try {
-    issues = await fetchIssues();
+    const allIssues = await listOpenIssues();
+    issues = allIssues.filter((issue) => !issue.pull_request);
   } catch (error) {
-    errorMessage = error instanceof Error ? error.message : "Unknown error";
+    errorMessage =
+      error instanceof Error ? error.message : "Unable to load GitHub issues.";
   }
 
-  const groupedIssues = STATUS_COLUMNS.reduce(
-    (accumulator, column) => {
-      accumulator[column.key] = [];
-      return accumulator;
-    },
-    {} as Record<string, GitHubIssue[]>,
+  const issuesByStatus = STATUS_COLUMNS.reduce(
+    (acc, column) => ({ ...acc, [column.key]: [] as typeof issues }),
+    {} as Record<string, typeof issues>,
   );
 
-  for (const issue of issues) {
-    const statusKey = getStatusKey(issue.labels);
-    groupedIssues[statusKey].push(issue);
-  }
+  issues.forEach((issue) => {
+    const statusLabel = getStatusLabel(issue.labels);
+    const columnKey = STATUS_COLUMNS.some(
+      (column) => column.key === statusLabel,
+    )
+      ? statusLabel!
+      : "status/backlog";
+    issuesByStatus[columnKey].push(issue);
+  });
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-900">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-8">
-        <nav className="flex items-center justify-between text-sm">
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            Kanban
-          </span>
-          <Link
-            href="/activity"
-            className="text-zinc-600 transition hover:text-zinc-900"
-          >
-            Activity →
-          </Link>
-        </nav>
-
-        <header className="flex flex-col gap-2">
-          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-zinc-500">
-            Open Issues Kanban
-          </p>
-          <div className="flex flex-wrap items-baseline gap-3">
-            <h1 className="text-3xl font-semibold leading-tight text-zinc-900">
-              {githubRepoSlug}
-            </h1>
-            <span className="text-sm text-zinc-500">
-              {issues.length} open issue{issues.length === 1 ? "" : "s"}
-            </span>
+    <section className="space-y-8">
+      <header className="space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+          GitHub Issues
+        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-semibold text-zinc-900">Kanban</h1>
+            <p className="max-w-xl text-sm text-zinc-600">
+              Track the active issues and keep the board aligned with status
+              labels.
+            </p>
           </div>
-          <p className="max-w-2xl text-sm text-zinc-600">
-            Issues are grouped by status labels. Issues without a status label
-            default to Backlog. Pull requests are excluded.
-          </p>
-        </header>
+          {repoUrl ? (
+            <Link
+              className="rounded-full border border-zinc-200 px-4 py-2 text-xs font-semibold text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
+              href={repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              View Repository
+            </Link>
+          ) : null}
+        </div>
+      </header>
 
-        {errorMessage ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {errorMessage}
-          </div>
-        ) : null}
-
-        <section className="grid gap-6 lg:grid-cols-5">
-          {STATUS_COLUMNS.map((column) => {
-            const columnIssues = groupedIssues[column.key] ?? [];
-            return (
-              <div
-                key={column.key}
-                className="flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white/80 p-4 shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-600">
-                    {column.title}
-                  </h2>
-                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600">
-                    {columnIssues.length}
-                  </span>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  {columnIssues.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 p-4 text-xs text-zinc-500">
-                      No open issues.
-                    </div>
-                  ) : (
-                    columnIssues.map((issue) => {
-                      const labelChips = getTypePriorityLabels(issue.labels);
-                      return (
-                        <a
-                          key={issue.id}
-                          href={issue.html_url}
-                          className="group flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow-md"
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          <div className="flex items-center justify-between text-xs font-semibold text-zinc-500">
-                            <span>#{issue.number}</span>
-                            <span className="text-[10px] uppercase tracking-wide text-zinc-400">
-                              GitHub
-                            </span>
-                          </div>
-                          <h3 className="text-sm font-semibold leading-snug text-zinc-900 group-hover:text-zinc-700">
+      {errorMessage ? (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {errorMessage}
+        </div>
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-5">
+          {STATUS_COLUMNS.map((column) => (
+            <div key={column.key} className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-zinc-700">
+                  {column.title}
+                </h2>
+                <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600">
+                  {issuesByStatus[column.key].length}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {issuesByStatus[column.key].length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-zinc-200 bg-white px-4 py-6 text-xs text-zinc-500">
+                    No issues
+                  </div>
+                ) : (
+                  issuesByStatus[column.key].map((issue) => (
+                    <article
+                      key={issue.id}
+                      className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                            #{issue.number}
+                          </p>
+                          <h3 className="text-sm font-semibold text-zinc-900">
                             {issue.title}
                           </h3>
-                          <div className="flex flex-wrap gap-2">
-                            {labelChips.length === 0 ? (
-                              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
-                                No type/priority labels
-                              </span>
-                            ) : (
-                              labelChips.map((label) => (
-                                <span
-                                  key={label.id}
-                                  className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600"
-                                >
-                                  {label.name}
-                                </span>
-                              ))
-                            )}
-                          </div>
-                        </a>
-                      );
-                    })
-                  )}
-                </div>
+                        </div>
+                        <Link
+                          href={issue.html_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-semibold text-zinc-500 hover:text-zinc-800"
+                        >
+                          Open
+                        </Link>
+                      </div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                        <span>by {issue.user.login}</span>
+                        {issue.labels
+                          .filter((label) => label.name.startsWith("type/"))
+                          .map((label) => (
+                            <span
+                              key={label.name}
+                              className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600"
+                            >
+                              {label.name.replace("type/", "")}
+                            </span>
+                          ))}
+                      </div>
+                    </article>
+                  ))
+                )}
               </div>
-            );
-          })}
-        </section>
-      </main>
-    </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

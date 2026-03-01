@@ -5,9 +5,16 @@ const githubRepo =
 const githubToken = process.env.GITHUB_TOKEN?.trim() || "";
 
 export const githubConfig = {
+  apiBase: process.env.GITHUB_API_BASE ?? "https://api.github.com",
   owner: githubOwner,
   repo: githubRepo,
   token: githubToken,
 };
 
-export const githubRepoSlug = `${githubOwner}/${githubRepo}`;
+/** "owner/repo" shorthand */
+export const repoSlug = `${githubOwner}/${githubRepo}`;
+
+/** Alias used by some pages */
+export const githubRepoSlug = repoSlug;
+
+export const repoUrl = `https://github.com/${repoSlug}`;
