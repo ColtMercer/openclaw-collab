@@ -1,5 +1,9 @@
 import { githubConfig, repoSlug } from "./config";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 export type GithubUser = {
   login: string;
   avatar_url?: string;
@@ -37,7 +41,15 @@ export type GithubReview = {
   submitted_at: string;
 };
 
-export type PullRequestStatus = "draft" | "open" | "approved" | "changes-requested";
+export type PullRequestStatus =
+  | "draft"
+  | "open"
+  | "approved"
+  | "changes-requested";
+
+// ---------------------------------------------------------------------------
+// Low-level fetch helper
+// ---------------------------------------------------------------------------
 
 const API_VERSION = "2022-11-28";
 
@@ -50,22 +62,21 @@ const withAuthHeaders = () => {
   if (!githubConfig.token) {
     return baseHeaders;
   }
-
-  return {
-    ...baseHeaders,
-    Authorization: `Bearer ${githubConfig.token}`,
-  };
+  return { ...baseHeaders, Authorization: `Bearer ${githubConfig.token}` };
 };
 
 const ensureRepoSlug = () => {
   if (!repoSlug) {
     throw new Error(
-      "Missing GitHub config. Set GITHUB_OWNER and GITHUB_REPO in the environment."
+      "Missing GitHub config. Set GITHUB_OWNER and GITHUB_REPO in the environment.",
     );
   }
 };
 
-const buildUrl = (path: string, params: Record<string, string | number | undefined> = {}) => {
+const buildUrl = (
+  path: string,
+  params: Record<string, string | number | undefined> = {},
+) => {
   const url = new URL(`${githubConfig.apiBase}${path}`);
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
@@ -75,9 +86,38 @@ const buildUrl = (path: string, params: Record<string, string | number | undefin
   return url.toString();
 };
 
+/** Generic GitHub fetch helper (accepts absolute URLs or /path strings). */
+export async function fetchGitHub<T>(
+  path: string,
+  options: RequestInit & { next?: { revalidate?: number } } = {},
+): Promise<T> {
+  const headers = new Headers({
+    ...withAuthHeaders(),
+    ...(options.headers as Record<string, string> | undefined),
+  });
+
+  const url = path.startsWith("http")
+    ? path
+    : `${githubConfig.apiBase}${path}`;
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    // @ts-expect-error Next.js extended fetch option
+    next: options.next ?? { revalidate: 300 },
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`GitHub API error ${response.status}: ${body}`);
+  }
+
+  return (await response.json()) as T;
+}
+
 const githubRequest = async <T>(
   path: string,
-  params?: Record<string, string | number | undefined>
+  params?: Record<string, string | number | undefined>,
 ): Promise<T> => {
   ensureRepoSlug();
   const url = buildUrl(path, params);
@@ -93,6 +133,10 @@ const githubRequest = async <T>(
 
   return response.json() as Promise<T>;
 };
+
+// ---------------------------------------------------------------------------
+// Public API helpers
+// ---------------------------------------------------------------------------
 
 export const listOpenIssues = async (): Promise<GithubIssue[]> => {
   return githubRequest<GithubIssue[]>(`/repos/${repoSlug}/issues`, {
@@ -111,32 +155,22 @@ export const listOpenPullRequests = async (): Promise<GithubPullRequest[]> => {
 };
 
 export const listPullRequestReviews = async (
-  prNumber: number
+  prNumber: number,
 ): Promise<GithubReview[]> => {
   return githubRequest<GithubReview[]>(
     `/repos/${repoSlug}/pulls/${prNumber}/reviews`,
-    {
-      per_page: 100,
-    }
+    { per_page: 100 },
   );
 };
 
 export const getPullRequestStatus = (
   pr: GithubPullRequest,
-  reviews: GithubReview[]
+  reviews: GithubReview[],
 ): PullRequestStatus => {
-  if (pr.draft) {
-    return "draft";
-  }
-
-  if (reviews.some((review) => review.state === "CHANGES_REQUESTED")) {
+  if (pr.draft) return "draft";
+  if (reviews.some((r) => r.state === "CHANGES_REQUESTED"))
     return "changes-requested";
-  }
-
-  if (reviews.some((review) => review.state === "APPROVED")) {
-    return "approved";
-  }
-
+  if (reviews.some((r) => r.state === "APPROVED")) return "approved";
   return "open";
 };
 

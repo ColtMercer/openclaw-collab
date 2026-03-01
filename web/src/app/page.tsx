@@ -24,12 +24,14 @@ export default async function Home() {
 
   const issuesByStatus = STATUS_COLUMNS.reduce(
     (acc, column) => ({ ...acc, [column.key]: [] as typeof issues }),
-    {} as Record<string, typeof issues>
+    {} as Record<string, typeof issues>,
   );
 
   issues.forEach((issue) => {
     const statusLabel = getStatusLabel(issue.labels);
-    const columnKey = STATUS_COLUMNS.some((column) => column.key === statusLabel)
+    const columnKey = STATUS_COLUMNS.some(
+      (column) => column.key === statusLabel,
+    )
       ? statusLabel!
       : "status/backlog";
     issuesByStatus[columnKey].push(issue);

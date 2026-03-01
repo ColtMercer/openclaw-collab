@@ -20,6 +20,26 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Kanban Board
+
+The home page renders a read-only Kanban board sourced from the GitHub Issues API.
+Open issues are grouped into columns based on these status labels:
+
+- `status/backlog`
+- `status/ready`
+- `status/in-progress`
+- `status/review`
+- `status/done`
+
+Issues without a status label default to Backlog. Pull requests are filtered out.
+Cards show issue number, title, type/priority labels, and link to GitHub.
+
+### Environment Variables
+
+- `GITHUB_OWNER` (optional): GitHub owner/org. Defaults to `ColtMercer`.
+- `GITHUB_REPO` (optional): GitHub repo name. Defaults to `openclaw-collab`.
+- `GITHUB_TOKEN` (optional): Personal access token to avoid rate limits.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
