@@ -59,6 +59,10 @@ function formatWeekLabel(dateKey: string) {
   return `Week of ${weekFormatter.format(new Date(`${dateKey}T00:00:00Z`))}`;
 }
 
+function getWeekAgoCutoff() {
+  return Date.now() - 7 * 24 * 60 * 60 * 1000;
+}
+
 function groupItems(items: ActivityItem[], labelForKey: (key: string) => string) {
   const map = new Map<string, ActivityItem[]>();
   for (const item of items) {
@@ -106,7 +110,7 @@ export default async function ActivityPage() {
         ),
       ]);
 
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const cutoff = getWeekAgoCutoff();
 
       issueItems = issues
         .filter((issue) => !issue.pull_request)
