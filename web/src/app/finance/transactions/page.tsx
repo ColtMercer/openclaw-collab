@@ -4,20 +4,38 @@ import { TransactionRow } from "@/components/finance/TransactionRow";
 
 export const dynamic = "force-dynamic";
 
-export default async function TransactionsPage({ searchParams }: { searchParams: Promise<any> }) {
+type TransactionsSearchParams = Record<string, string | string[] | undefined>;
+
+type TransactionDoc = {
+  transaction_id: string;
+};
+
+type TransactionResult = {
+  docs: TransactionDoc[];
+  total: number;
+  page: number;
+  pages: number;
+};
+
+function getParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+export default async function TransactionsPage({ searchParams }: { searchParams: Promise<TransactionsSearchParams> }) {
   const params = await searchParams;
-  const search = params.search || "";
-  const category = params.category || "";
-  const account = params.account || "";
-  const page = parseInt(params.page || "1");
-  const dateFrom = params.dateFrom || "";
-  const dateTo = params.dateTo || "";
+  const search = getParam(params.search);
+  const category = getParam(params.category);
+  const account = getParam(params.account);
+  const page = parseInt(getParam(params.page) || "1");
+  const dateFrom = getParam(params.dateFrom);
+  const dateTo = getParam(params.dateTo);
 
   const [result, categories, accounts] = await Promise.all([
     getTransactions({ search, category, account, page, dateFrom, dateTo, limit: 50 }),
     getDistinctCategories(),
     getDistinctAccounts(),
   ]);
+  const typedResult = result as TransactionResult;
 
   const buildUrl = (overrides: Record<string, string>) => {
     const p = new URLSearchParams({ search, category, account, dateFrom, dateTo, page: "1", ...overrides });
@@ -27,7 +45,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Transactions</h1>
-      <p className="text-zinc-500">{result.total.toLocaleString()} transactions</p>
+      <p className="text-zinc-500">{typedResult.total.toLocaleString()} transactions</p>
 
       <form className="flex flex-wrap gap-3 items-end">
         <div>
@@ -79,7 +97,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
             </tr>
           </thead>
           <tbody>
-            {result.docs.map((t: any) => (
+            {typedResult.docs.map((t) => (
               <TransactionRow key={t.transaction_id} t={JSON.parse(JSON.stringify(t))} />
             ))}
           </tbody>
@@ -87,13 +105,13 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
       </div>
 
       <div className="flex items-center justify-between text-sm text-zinc-400">
-        <span>Page {result.page} of {result.pages}</span>
+        <span>Page {typedResult.page} of {typedResult.pages}</span>
         <div className="flex gap-2">
           {page > 1 && (
             <a href={buildUrl({ page: String(page - 1) })}
               className="bg-zinc-800 px-3 py-1 rounded-lg hover:bg-zinc-700">← Prev</a>
           )}
-          {page < result.pages && (
+          {page < typedResult.pages && (
             <a href={buildUrl({ page: String(page + 1) })}
               className="bg-zinc-800 px-3 py-1 rounded-lg hover:bg-zinc-700">Next →</a>
           )}

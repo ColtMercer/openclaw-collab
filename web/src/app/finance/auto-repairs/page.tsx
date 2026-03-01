@@ -6,6 +6,12 @@ export const dynamic = "force-dynamic";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+type AutoRepairEntry = {
+  date?: string | Date | null;
+  description?: string;
+  amount?: number;
+};
+
 function monthLabel(key: string) {
   const [year, month] = key.split("-").map(Number);
   const label = `${MONTHS[(month || 1) - 1]}`;
@@ -29,9 +35,9 @@ function cleanShopName(raw: string): string {
 }
 
 export default async function AutoRepairsPage() {
-  const timeline = await getAutoRepairTimeline();
+  const timeline = await getAutoRepairTimeline() as AutoRepairEntry[];
 
-  const totalSpent = timeline.reduce((s: number, t: any) => s + (t.amount || 0), 0);
+  const totalSpent = timeline.reduce((s, t) => s + (t.amount || 0), 0);
   const repairCount = timeline.length;
   const avgPerVisit = repairCount > 0 ? totalSpent / repairCount : 0;
 
@@ -69,7 +75,12 @@ export default async function AutoRepairsPage() {
   const monthlyAverage = monthCount > 0 ? totalSpent / monthCount : 0;
   const maxMonthly = Math.max(...monthlyTotals.map((m) => m.total), 1);
 
-  let runningTotal = 0;
+  const timelineWithRunning = timeline.reduce<Array<{ entry: AutoRepairEntry; runningTotal: number }>>((acc, entry) => {
+    const previous = acc[acc.length - 1]?.runningTotal ?? 0;
+    const runningTotal = previous + (entry.amount || 0);
+    acc.push({ entry, runningTotal });
+    return acc;
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -120,16 +131,15 @@ export default async function AutoRepairsPage() {
               </tr>
             </thead>
             <tbody>
-              {timeline.map((t: any, i: number) => {
-                runningTotal += t.amount || 0;
-                const date = t.date ? new Date(t.date) : null;
+              {timelineWithRunning.map(({ entry, runningTotal }, i) => {
+                const date = entry.date ? new Date(entry.date) : null;
                 return (
-                  <tr key={`${t.description}-${i}`} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                  <tr key={`${entry.description}-${i}`} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
                     <td className="py-2 text-zinc-300">
                       {date ? date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
                     </td>
-                    <td className="py-2 font-medium text-zinc-200">{cleanShopName(t.description || "Unknown")}</td>
-                    <td className="py-2 text-right font-mono text-zinc-100">{formatCurrency(t.amount || 0)}</td>
+                    <td className="py-2 font-medium text-zinc-200">{cleanShopName(entry.description || "Unknown")}</td>
+                    <td className="py-2 text-right font-mono text-zinc-100">{formatCurrency(entry.amount || 0)}</td>
                     <td className="py-2 text-right font-mono text-zinc-300">{formatCurrency(runningTotal)}</td>
                   </tr>
                 );

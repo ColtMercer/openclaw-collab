@@ -20,7 +20,18 @@ type AmazonItem = {
   order_id?: string;
 };
 
-export function TransactionRow({ t, showAccount = true }: { t: any; showAccount?: boolean }) {
+type Transaction = {
+  transaction_id: string;
+  date?: string | Date;
+  description?: string;
+  category?: string;
+  account?: string;
+  amount: number;
+  receipt_attachment_count?: number;
+  amazon_items?: AmazonItem[];
+};
+
+export function TransactionRow({ t, showAccount = true }: { t: Transaction; showAccount?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [attachments, setAttachments] = useState<ReceiptAttachment[]>([]);
   const [loadingAttachments, setLoadingAttachments] = useState(false);
@@ -52,8 +63,8 @@ export function TransactionRow({ t, showAccount = true }: { t: any; showAccount?
       const data = await res.json();
       setAttachments(data);
       setHasAttachments(data.length > 0);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load receipts");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load receipts");
     }
     setLoadingAttachments(false);
   };
@@ -80,8 +91,8 @@ export function TransactionRow({ t, showAccount = true }: { t: any; showAccount?
         setAttachments((prev) => [attachment, ...prev]);
         setHasAttachments(true);
       }
-    } catch (e: any) {
-      setError(e?.message || "Upload failed");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Upload failed");
     }
     setUploading(false);
   };
@@ -101,8 +112,8 @@ export function TransactionRow({ t, showAccount = true }: { t: any; showAccount?
       setAttachments((prev) =>
         prev.map((item) => (item._id === attachment._id ? { ...item, line_items: data.items || [] } : item))
       );
-    } catch (e: any) {
-      setError(e?.message || "OCR failed");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "OCR failed");
     }
     setOcring(null);
   };
@@ -289,7 +300,7 @@ export function TransactionRow({ t, showAccount = true }: { t: any; showAccount?
   );
 }
 
-export function SimpleTransactionRow({ t }: { t: any }) {
+export function SimpleTransactionRow({ t }: { t: Transaction }) {
   return (
     <tr className="border-b border-zinc-800/50 hover:bg-zinc-800/30 group">
       <td className="py-2 text-zinc-400">{t.date ? formatDate(t.date) : "-"}</td>

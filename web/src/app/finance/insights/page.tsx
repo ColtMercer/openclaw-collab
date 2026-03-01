@@ -4,15 +4,29 @@ import { DowChart } from "@/components/finance/Charts";
 
 export const dynamic = "force-dynamic";
 
+type TrendEntry = {
+  _id: {
+    month: string;
+    category: string;
+  };
+  total: number;
+};
+
+type MerchantEntry = {
+  _id: string;
+  total: number;
+  count: number;
+};
+
 export default async function InsightsPage() {
   const { dow, merchants, trends } = await getInsightsData();
 
   const serializedDow = JSON.parse(JSON.stringify(dow));
 
   // Build category trend table
-  const trendMonths = [...new Set(trends.map((t: any) => t._id.month))].sort();
+  const trendMonths = [...new Set((trends as TrendEntry[]).map((t) => t._id.month))].sort();
   const trendCategories: Record<string, Record<string, number>> = {};
-  trends.forEach((t: any) => {
+  (trends as TrendEntry[]).forEach((t) => {
     if (!trendCategories[t._id.category]) trendCategories[t._id.category] = {};
     trendCategories[t._id.category][t._id.month] = t.total;
   });
@@ -34,8 +48,8 @@ export default async function InsightsPage() {
         <div className="bg-[#141420] border border-[#27272a] rounded-xl p-5">
           <h2 className="text-lg font-semibold mb-4">Top Merchants</h2>
           <div className="space-y-2">
-            {merchants.map((m: any, i: number) => {
-              const maxTotal = merchants[0]?.total || 1;
+            {(merchants as MerchantEntry[]).map((m, i) => {
+              const maxTotal = (merchants as MerchantEntry[])[0]?.total || 1;
               const pct = (m.total / maxTotal) * 100;
               return (
                 <div key={i} className="space-y-1">
@@ -59,7 +73,7 @@ export default async function InsightsPage() {
           <thead>
             <tr className="text-zinc-500 border-b border-zinc-800">
               <th className="text-left pb-2 font-medium">Category</th>
-              {trendMonths.map((m: any) => (
+              {trendMonths.map((m) => (
                 <th key={m} className="text-right pb-2 font-medium px-3">{m}</th>
               ))}
               <th className="text-right pb-2 font-medium">Total</th>
@@ -69,7 +83,7 @@ export default async function InsightsPage() {
             {catTotals.map(({ cat, total }) => (
               <tr key={cat} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
                 <td className="py-2 font-medium">{cat}</td>
-                {trendMonths.map((m: any) => (
+                {trendMonths.map((m) => (
                   <td key={m} className="py-2 text-right text-zinc-400 px-3">
                     {trendCategories[cat][m] ? formatCurrency(trendCategories[cat][m]) : "-"}
                   </td>

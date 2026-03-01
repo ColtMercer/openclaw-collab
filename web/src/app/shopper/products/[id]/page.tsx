@@ -1,6 +1,6 @@
 import { ObjectId } from 'mongodb';
 import { getDb } from '@/lib/shopper-db';
-import ProductDetailClient from './ProductDetailClient';
+import ProductDetailClient, { type ProductDetail } from './ProductDetailClient';
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -29,5 +29,5 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     date: p.date?.toISOString?.() ?? p.date,
   }));
 
-  return <ProductDetailClient product={serialized as any} history={serializedHistory} />;
+  return <ProductDetailClient product={serialized as ProductDetail} history={serializedHistory} />;
 }

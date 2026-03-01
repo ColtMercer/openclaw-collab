@@ -5,18 +5,37 @@ import { CommentButton } from "@/components/finance/CommentButton";
 
 export const dynamic = "force-dynamic";
 
+type RecurringPattern = {
+  frequency?: string;
+  is_income?: boolean;
+  average_amount: number;
+  sample_description?: string;
+  description?: string;
+  category?: string;
+  months_seen?: number;
+  last_seen?: string | Date | null;
+};
+
+type MonthlyActualRow = {
+  _id: {
+    description: string;
+    month: string;
+  };
+  total: number;
+};
+
 export default async function RecurringPage() {
   const [patterns, { monthlyActuals }] = await Promise.all([
     getRecurringPatterns(),
     getRecurringChangeData(),
   ]);
 
-  const monthly = patterns.filter((p: any) => p.frequency === "monthly");
-  const income = monthly.filter((p: any) => p.is_income);
-  const expenses = monthly.filter((p: any) => !p.is_income);
+  const monthly = (patterns as RecurringPattern[]).filter((p) => p.frequency === "monthly");
+  const income = monthly.filter((p) => p.is_income);
+  const expenses = monthly.filter((p) => !p.is_income);
 
-  const totalIncome = income.reduce((s: number, p: any) => s + p.average_amount, 0);
-  const totalExpenses = expenses.reduce((s: number, p: any) => s + Math.abs(p.average_amount), 0);
+  const totalIncome = income.reduce((s, p) => s + p.average_amount, 0);
+  const totalExpenses = expenses.reduce((s, p) => s + Math.abs(p.average_amount), 0);
 
   // Build month-over-month deltas from actual transaction data
   const now = new Date();
@@ -28,7 +47,7 @@ export default async function RecurringPage() {
 
   // Group monthly actuals by description → month → total
   const actualMap: Record<string, Record<string, number>> = {};
-  for (const row of monthlyActuals as any[]) {
+  for (const row of monthlyActuals as MonthlyActualRow[]) {
     const desc = row._id.description as string;
     const month = row._id.month as string;
     if (!actualMap[desc]) actualMap[desc] = {};
@@ -52,8 +71,8 @@ export default async function RecurringPage() {
   }
 
   const patternChanges: PatternChange[] = expenses
-    .filter((p: any) => Math.abs(p.average_amount) >= 1)
-    .map((p: any) => {
+    .filter((p) => Math.abs(p.average_amount) >= 1)
+    .map((p) => {
       const name = (p.sample_description || p.description || "").trim();
       // Find matching actual descriptions (case-insensitive substring match)
       const lowerName = name.toLowerCase().slice(0, 20); // first 20 chars for matching
@@ -88,7 +107,7 @@ export default async function RecurringPage() {
   const priceChanges = patternChanges.filter((p) => p.isChanged);
   const bigAlerts = patternChanges.filter((p) => p.isIncrease && p.delta > 50);
 
-  const isActive = (p: any) => {
+  const isActive = (p: RecurringPattern) => {
     if (!p.last_seen) return false;
     const last = new Date(p.last_seen);
     const cutoff = new Date();
@@ -200,7 +219,7 @@ export default async function RecurringPage() {
             {patternChanges
               .sort((a, b) => b.avgAmount - a.avgAmount)
               .map((pc, i) => {
-                const origPattern = expenses.find((p: any) =>
+                const origPattern = expenses.find((p) =>
                   (p.sample_description || p.description || "").trim() === pc.name
                 );
                 const statusEmoji = !pc.currentMonth && !pc.lastMonth
@@ -266,7 +285,7 @@ export default async function RecurringPage() {
             </tr>
           </thead>
           <tbody>
-            {income.filter((p: any) => p.average_amount >= 1).map((p: any, i: number) => (
+            {income.filter((p) => p.average_amount >= 1).map((p, i) => (
               <tr key={i} className="border-b border-zinc-800/50 hover:bg-zinc-800/30 group">
                 <td className="py-2">{isActive(p) ? "✅" : "⚠️"}</td>
                 <td className="py-2 max-w-sm truncate">{p.sample_description}</td>

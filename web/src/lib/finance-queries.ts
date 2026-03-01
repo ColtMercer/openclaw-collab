@@ -51,7 +51,7 @@ export async function getTransactions(params: {
   page?: number; limit?: number;
 }) {
   const db = await getDb();
-  const filter: any = { amount: { $ne: null } };
+  const filter: Record<string, unknown> = { amount: { $ne: null } };
   
   if (params.search) filter.description = { $regex: params.search, $options: "i" };
   if (params.category) filter.category = params.category;
@@ -584,8 +584,9 @@ export async function getMonthlySavingsRate(months = 12) {
     },
     { $sort: { _id: 1 } },
   ];
-  const rows = await db.collection("transactions").aggregate(pipeline).toArray();
-  return rows.map((r: any) => {
+  type MonthlySavingsRow = { income: number; expenses: number } & Record<string, unknown>;
+  const rows = await db.collection("transactions").aggregate(pipeline).toArray() as MonthlySavingsRow[];
+  return rows.map((r) => {
     // Cap income at 15k to avoid RSU/bonus anomaly months skewing the rate
     const cappedIncome = Math.min(r.income, 15000);
     const net = cappedIncome - r.expenses;
@@ -634,12 +635,12 @@ export async function getSpendingVelocity() {
     ]).toArray(),
   ]);
 
-  const spentSoFar = dailyThisMonth.reduce((s: number, d: any) => s + d.total, 0);
+  const spentSoFar = (dailyThisMonth as Array<{ total: number }>).reduce((s, d) => s + d.total, 0);
   const dailyBurnRate = spentSoFar / daysElapsed;
   const projectedMonthEnd = dailyBurnRate * daysInMonth;
   const avgHistorical =
     historicalMonthly.length > 0
-      ? historicalMonthly.reduce((s: number, m: any) => s + m.total, 0) / historicalMonthly.length
+      ? (historicalMonthly as Array<{ total: number }>).reduce((s, m) => s + m.total, 0) / historicalMonthly.length
       : 0;
 
   return {
@@ -698,7 +699,7 @@ export async function getBudgetHistory(months = 6) {
     { group: string; budgets: Record<string, number>; actuals: Record<string, number>; totalActual: number }
   > = {};
 
-  categories.forEach((c: any) => {
+  (categories as Array<{ category: string; group?: string; monthly_budgets?: Record<string, number> }>).forEach((c) => {
     const budgets: Record<string, number> = {};
     monthSlots.forEach((slot) => {
       budgets[slot.key] = c.monthly_budgets?.[slot.budgetKey] || 0;
@@ -706,9 +707,9 @@ export async function getBudgetHistory(months = 6) {
     catMap[c.category] = { group: c.group || "", budgets, actuals: {}, totalActual: 0 };
   });
 
-  spendingByMonth.forEach((monthData: any[], i: number) => {
+  spendingByMonth.forEach((monthData, i) => {
     const slot = monthSlots[i];
-    monthData.forEach((row: any) => {
+    (monthData as Array<{ _id: string; total: number }>).forEach((row) => {
       if (!catMap[row._id]) {
         catMap[row._id] = { group: "", budgets: {}, actuals: {}, totalActual: 0 };
       }
@@ -767,10 +768,9 @@ export async function getPeerPaymentData(months = 12) {
     return d;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recipientMap: Record<string, { total: number; count: number; lastDate: string; platform: string; transactions: any[] }> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const t of allTransactions as any[]) {
+  type PeerTransaction = { amount?: number; description?: string; date: string };
+  const recipientMap: Record<string, { total: number; count: number; lastDate: string; platform: string; transactions: PeerTransaction[] }> = {};
+  for (const t of allTransactions as PeerTransaction[]) {
     if ((t.amount || 0) >= 0) continue;
     const recipient = extractRecipient(t.description || "");
     const desc = (t.description || "").toLowerCase();
@@ -796,12 +796,10 @@ export async function getPeerPaymentData(months = 12) {
     .map(([name, data]) => ({ name, ...data }))
     .sort((a, b) => b.total - a.total);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const totalSent = byRecipient.reduce((s, r) => s + r.total, 0);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const totalReceived = (allTransactions as any[])
-    .filter((t: any) => (t.amount || 0) > 0)
-    .reduce((s: number, t: any) => s + t.amount, 0);
+  const totalReceived = (allTransactions as PeerTransaction[])
+    .filter((t) => (t.amount || 0) > 0)
+    .reduce((s, t) => s + (t.amount || 0), 0);
 
   return { byRecipient, byMonth, allTransactions, totalSent, totalReceived };
 }

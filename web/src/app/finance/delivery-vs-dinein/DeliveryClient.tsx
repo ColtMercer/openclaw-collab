@@ -185,7 +185,7 @@ export default function DeliveryClient({ deliveryByMonth, dineInByMonth, deliver
         <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-4 text-sm">
           <span className="font-semibold text-orange-400">💡 Insight: </span>
           <span className="text-zinc-300">
-            You're paying {deliveryPremium.toFixed(0)}% more per order via delivery apps compared to dining in. 
+            You&apos;re paying {deliveryPremium.toFixed(0)}% more per order via delivery apps compared to dining in. 
             Over the last 6 months that delivery premium cost you roughly{" "}
             <strong>{formatCurrency(Math.max(0, totalDelivery - (avgDineOrder * totalDelivOrders)))}</strong> extra.
           </span>

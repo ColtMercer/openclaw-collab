@@ -72,8 +72,8 @@ function RulesPage() {
       if (!res.ok) throw new Error("Failed to load rules");
       const data = (await res.json()) as Rule[];
       setRules(data);
-    } catch (e: any) {
-      setError(e?.message || "Failed to load rules");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load rules");
     }
     setLoading(false);
   };
@@ -150,8 +150,8 @@ function RulesPage() {
       }
       await loadRules();
       resetForm();
-    } catch (e: any) {
-      setError(e?.message || "Failed to save rule");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save rule");
     }
     setSaving(false);
   };
@@ -163,8 +163,8 @@ function RulesPage() {
       const res = await fetch(`/api/rules?id=${rule._id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete rule");
       await loadRules();
-    } catch (e: any) {
-      setError(e?.message || "Failed to delete rule");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to delete rule");
     }
   };
 
@@ -178,8 +178,8 @@ function RulesPage() {
       });
       if (!res.ok) throw new Error("Failed to update rule");
       await loadRules();
-    } catch (e: any) {
-      setError(e?.message || "Failed to update rule");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update rule");
     }
   };
 
@@ -192,8 +192,8 @@ function RulesPage() {
       const data = await res.json();
       setApplyResults(data.results || []);
       await loadRules();
-    } catch (e: any) {
-      setError(e?.message || "Failed to apply rules");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to apply rules");
     }
     setApplyLoading(false);
   };

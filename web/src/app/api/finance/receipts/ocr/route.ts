@@ -54,21 +54,25 @@ export async function POST(req: NextRequest) {
 
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
-  let parsed: any = { items: [] };
+  let parsed: { items?: unknown } = { items: [] };
   try {
-    parsed = content ? JSON.parse(content) : { items: [] };
+    parsed = content ? JSON.parse(content) as { items?: unknown } : { items: [] };
   } catch {
     parsed = { items: [] };
   }
 
+  type ParsedItem = { name?: unknown; qty?: unknown; price?: unknown };
   const items = Array.isArray(parsed.items)
     ? parsed.items
-        .map((item: any) => ({
-          name: String(item.name || "").trim(),
-          qty: typeof item.qty === "number" ? item.qty : Number(item.qty) || 1,
-          price: typeof item.price === "number" ? item.price : Number(item.price),
-        }))
-        .filter((item: any) => item.name.length > 0)
+        .map((item) => {
+          const parsedItem = item as ParsedItem;
+          return {
+            name: String(parsedItem.name || "").trim(),
+            qty: typeof parsedItem.qty === "number" ? parsedItem.qty : Number(parsedItem.qty) || 1,
+            price: typeof parsedItem.price === "number" ? parsedItem.price : Number(parsedItem.price),
+          };
+        })
+        .filter((item) => item.name.length > 0)
     : [];
 
   if (attachment_id) {

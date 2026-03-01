@@ -24,34 +24,67 @@ function runwayBg(days: number): string {
   return "bg-red-500/10 border-red-500/30";
 }
 
+type CashflowAccount = {
+  last_balance?: number;
+};
+
+type CashflowMonth = {
+  _id: string;
+  income: number;
+  expenses: number;
+};
+
+type RecurringPattern = {
+  average_amount: number;
+  frequency?: string;
+  sample_description?: string;
+  description?: string;
+  category?: string;
+};
+
+type IncomeSource = {
+  _id: string;
+  total: number;
+  count: number;
+};
+
+type CashflowProjection = {
+  accounts: CashflowAccount[];
+  monthlyData: CashflowMonth[];
+  recurringPatterns: RecurringPattern[];
+  incomeSources: IncomeSource[];
+};
+
+function getRunwayDate(base: Date, runwayDays: number) {
+  return new Date(base.getTime() + runwayDays * 86400000);
+}
+
 export default async function CashFlowPage() {
-  const { accounts, monthlyData, recurringPatterns, incomeSources } = await getCashFlowProjection();
+  const { accounts, monthlyData, recurringPatterns, incomeSources } = await getCashFlowProjection() as CashflowProjection;
 
   // Total liquid balance
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const totalBalance = accounts.reduce((s: number, a: any) => s + (a.last_balance || 0), 0);
+  const totalBalance = accounts.reduce((s, a) => s + (a.last_balance || 0), 0);
 
   // Avg monthly income/expenses over last 3 months (exclude anomaly months > 30K income)
   const recentMonths = monthlyData.slice(-3);
   const avgIncome = recentMonths.length > 0
-    ? recentMonths.reduce((s: number, m: any) => {
+    ? recentMonths.reduce((s, m) => {
         // Cap income at 15K to exclude bonus/RSU anomaly months
         return s + Math.min(m.income, 15000);
       }, 0) / recentMonths.length
     : 0;
   const avgExpenses = recentMonths.length > 0
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? recentMonths.reduce((s: number, m: any) => s + m.expenses, 0) / recentMonths.length
+    ? recentMonths.reduce((s, m) => s + m.expenses, 0) / recentMonths.length
     : 0;
   const avgNet = avgIncome - avgExpenses;
   const avgDailyBurn = avgExpenses / 30.44;
 
   // Runway calculation
   const runwayDays = avgDailyBurn > 0 ? Math.floor(totalBalance / avgDailyBurn) : 9999;
-  const runwayDate = new Date(Date.now() + runwayDays * 86400000);
+  const now = new Date();
+  const runwayDate = getRunwayDate(now, runwayDays);
 
   // Build 3-month projection
-  const now = new Date();
   const projections = [1, 2, 3].map((offset) => {
     const month = addMonths(now, offset);
     const projectedBalance = totalBalance + avgNet * offset;
@@ -65,21 +98,15 @@ export default async function CashFlowPage() {
   });
 
   // Top recurring expenses sorted by amount
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const topRecurring = recurringPatterns
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((p: any) => Math.abs(p.average_amount) >= 10)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .sort((a: any, b: any) => Math.abs(b.average_amount) - Math.abs(a.average_amount))
+    .filter((p) => Math.abs(p.average_amount) >= 10)
+    .sort((a, b) => Math.abs(b.average_amount) - Math.abs(a.average_amount))
     .slice(0, 15);
 
   // Monthly recurring total
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recurringMonthly = recurringPatterns
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((p: any) => (p.frequency || "").toLowerCase().includes("month"))
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .reduce((s: number, p: any) => s + Math.abs(p.average_amount), 0);
+    .filter((p) => (p.frequency || "").toLowerCase().includes("month"))
+    .reduce((s, p) => s + Math.abs(p.average_amount), 0);
 
   return (
     <div className="space-y-6">
@@ -213,8 +240,7 @@ export default async function CashFlowPage() {
                 </tr>
               </thead>
               <tbody>
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {topRecurring.map((p: any, i: number) => (
+                {topRecurring.map((p, i) => (
                   <tr key={i} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
                     <td className="py-2 max-w-[240px] truncate text-zinc-200">{p.sample_description || p.description}</td>
                     <td className="py-2">
@@ -237,8 +263,7 @@ export default async function CashFlowPage() {
         <div className="bg-[#141420] border border-[#27272a] rounded-xl p-5">
           <h2 className="text-lg font-semibold mb-4">Recent Income Sources <span className="text-zinc-500 text-sm font-normal">(last 60 days)</span></h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {incomeSources.map((src: any, i: number) => (
+            {incomeSources.map((src, i) => (
               <div key={i} className="flex items-center justify-between bg-zinc-900/50 border border-zinc-800 rounded-lg px-3 py-2">
                 <div>
                   <div className="text-sm font-medium text-zinc-200 truncate max-w-[200px]">{src._id}</div>

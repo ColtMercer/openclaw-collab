@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import PriceChart from '@/components/shopper/PriceChart';
 
-type ProductDetail = {
+export type ProductDetail = {
   _id: string;
   title: string;
   price: number;
@@ -48,7 +48,12 @@ function EditableField({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value ?? ''));
 
-  useEffect(() => { if (!editing) setDraft(String(value ?? '')); }, [value, editing]);
+  useEffect(() => {
+    if (!editing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDraft(String(value ?? ''));
+    }
+  }, [value, editing]);
 
   const commit = async () => {
     if (draft !== String(value ?? '')) await onSave(draft);
@@ -89,7 +94,12 @@ function SourceLink({ url, onSave }: { url: string; onSave: (v: string) => Promi
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(url ?? '');
 
-  useEffect(() => { if (!editing) setDraft(url ?? ''); }, [url, editing]);
+  useEffect(() => {
+    if (!editing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDraft(url ?? '');
+    }
+  }, [url, editing]);
 
   const commit = async () => {
     if (draft !== url) await onSave(draft);

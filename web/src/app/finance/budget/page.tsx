@@ -5,6 +5,26 @@ import { CommentButton } from "@/components/finance/CommentButton";
 
 export const dynamic = "force-dynamic";
 
+type CategorySpending = {
+  _id: string;
+  total: number;
+};
+
+type Category = {
+  category: string;
+  group?: string;
+  type?: string;
+  monthly_budgets?: Record<string, number>;
+};
+
+type BudgetItem = {
+  category: string;
+  group?: string;
+  budget: number;
+  actual: number;
+  diff: number;
+};
+
 export default async function BudgetPage() {
   const now = new Date();
   const monthKey = now.toLocaleDateString("en-US", { month: "short", year: "numeric" });
@@ -15,21 +35,21 @@ export default async function BudgetPage() {
   ]);
 
   const spendingMap: Record<string, number> = {};
-  spending.forEach((s: any) => { spendingMap[s._id] = s.total; });
+  (spending as CategorySpending[]).forEach((s) => { spendingMap[s._id] = s.total; });
 
   // Build budget items from categories that have budgets
-  const budgetItems = categories
-    .filter((c: any) => c.type === "Expense")
-    .map((c: any) => {
+  const budgetItems: BudgetItem[] = (categories as Category[])
+    .filter((c) => c.type === "Expense")
+    .map((c) => {
       const budget = c.monthly_budgets?.[monthKey] || 0;
       const actual = spendingMap[c.category] || 0;
       return { category: c.category, group: c.group, budget, actual, diff: budget - actual };
     })
-    .sort((a: any, b: any) => b.actual - a.actual);
+    .sort((a, b) => b.actual - a.actual);
 
-  const totalBudget = budgetItems.reduce((s: any, i: any) => s + i.budget, 0);
-  const totalActual = budgetItems.reduce((s: any, i: any) => s + i.actual, 0);
-  const itemsWithSpending = budgetItems.filter((i: any) => i.actual > 0);
+  const totalBudget = budgetItems.reduce((s, i) => s + i.budget, 0);
+  const totalActual = budgetItems.reduce((s, i) => s + i.actual, 0);
+  const itemsWithSpending = budgetItems.filter((i) => i.actual > 0);
 
   return (
     <div className="space-y-6">
@@ -44,7 +64,7 @@ export default async function BudgetPage() {
 
       <div className="bg-[#141420] border border-[#27272a] rounded-xl p-5 space-y-3">
         <h2 className="text-lg font-semibold mb-2">Category Breakdown</h2>
-        {itemsWithSpending.map((item: any) => {
+        {itemsWithSpending.map((item) => {
           const pct = item.budget > 0 ? Math.min((item.actual / item.budget) * 100, 150) : 100;
           const overBudget = item.budget > 0 && item.actual > item.budget;
           const noBudget = item.budget === 0;
@@ -80,11 +100,11 @@ export default async function BudgetPage() {
         })}
       </div>
 
-      {budgetItems.filter((i: any) => i.actual === 0 && i.budget > 0).length > 0 && (
+      {budgetItems.filter((i) => i.actual === 0 && i.budget > 0).length > 0 && (
         <div className="bg-[#141420] border border-[#27272a] rounded-xl p-5">
           <h2 className="text-lg font-semibold mb-3">Budgeted but No Spending</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-            {budgetItems.filter((i: any) => i.actual === 0 && i.budget > 0).map((i: any) => (
+            {budgetItems.filter((i) => i.actual === 0 && i.budget > 0).map((i) => (
               <div key={i.category} className="text-zinc-400">
                 {i.category}: {formatCurrency(i.budget)}
               </div>

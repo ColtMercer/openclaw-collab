@@ -211,8 +211,8 @@ export default function ConvenienceClient({ byMonth, byMerchant, recentTransacti
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 text-sm">
           <span className="font-semibold text-amber-400">⚠️ Habit Alert: </span>
           <span className="text-zinc-300">
-            You're averaging <strong>{avgVisitsPerMonth.toFixed(1)} convenience store visits per month</strong> — 
-            that's roughly {(avgVisitsPerMonth / 4.3).toFixed(1)} per week. 
+            You&apos;re averaging <strong>{avgVisitsPerMonth.toFixed(1)} convenience store visits per month</strong> — 
+            that&apos;s roughly {(avgVisitsPerMonth / 4.3).toFixed(1)} per week. 
             At {formatCurrency(avgPerVisit)} per stop, convenience is costing you {formatCurrency(avgPerMonth * 12)}/year.
           </span>
         </div>

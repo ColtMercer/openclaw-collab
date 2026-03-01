@@ -6,6 +6,25 @@ import { SimpleTransactionRow } from "@/components/finance/TransactionRow";
 
 export const dynamic = "force-dynamic";
 
+type Account = {
+  last_balance?: number;
+};
+
+type MonthlyTotals = {
+  _id: string;
+  income: number;
+  expenses: number;
+};
+
+type CategoryTotal = {
+  _id: string;
+  total: number;
+};
+
+type Transaction = {
+  transaction_id: string;
+};
+
 export default async function Dashboard() {
   const [accounts, monthly, categories, recent] = await Promise.all([
     getAccountBalances(),
@@ -14,13 +33,13 @@ export default async function Dashboard() {
     getRecentTransactions(20),
   ]);
 
-  const totalBalance = accounts.reduce((s, a) => s + (a.last_balance || 0), 0);
-  const currentMonth = monthly[monthly.length - 1];
+  const totalBalance = (accounts as Account[]).reduce((s, a) => s + (a.last_balance || 0), 0);
+  const currentMonth = (monthly as MonthlyTotals[])[monthly.length - 1];
   const monthIncome = currentMonth?.income || 0;
   const monthExpenses = currentMonth?.expenses || 0;
 
-  const serializedMonthly = JSON.parse(JSON.stringify(monthly));
-  const serializedCategories = JSON.parse(JSON.stringify(categories));
+  const serializedMonthly = JSON.parse(JSON.stringify(monthly)) as MonthlyTotals[];
+  const serializedCategories = JSON.parse(JSON.stringify(categories)) as CategoryTotal[];
 
   return (
     <div className="space-y-6">
@@ -43,7 +62,7 @@ export default async function Dashboard() {
           <h2 className="text-lg font-semibold mb-4">Spending by Category (This Month)</h2>
           <CategoryDonut data={serializedCategories} />
           <div className="grid grid-cols-2 gap-1 mt-4 text-xs">
-            {serializedCategories.slice(0, 8).map((c: any, i: number) => (
+            {serializedCategories.slice(0, 8).map((c, i) => (
               <div key={c._id} className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#8b5cf6","#ef4444","#14b8a6"][i] }} />
                 <span className="text-zinc-400">{c._id}</span>
@@ -68,7 +87,7 @@ export default async function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {recent.map((t: any) => (
+              {(recent as Transaction[]).map((t) => (
                 <SimpleTransactionRow key={t.transaction_id} t={JSON.parse(JSON.stringify(t))} />
               ))}
             </tbody>

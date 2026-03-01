@@ -15,6 +15,21 @@ type OrderGroup = {
   items: AmazonItem[];
 };
 
+type TransactionCandidate = {
+  _id: unknown;
+  amount?: number;
+  transaction_id?: string;
+};
+
+type ImportMatch = {
+  orderId: string;
+  orderDate: string;
+  orderTotal: number;
+  transaction_id?: string;
+  matches?: Array<string | undefined>;
+  items: AmazonItem[];
+};
+
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -152,9 +167,9 @@ export async function POST(req: NextRequest) {
   }
 
   const db = await getDb();
-  const matched: any[] = [];
-  const unmatched: any[] = [];
-  const ambiguous: any[] = [];
+  const matched: ImportMatch[] = [];
+  const unmatched: ImportMatch[] = [];
+  const ambiguous: ImportMatch[] = [];
 
   for (const group of groups.values()) {
     const orderDate = group.orderDate || new Date();
@@ -168,7 +183,8 @@ export async function POST(req: NextRequest) {
       .find({ date: { $gte: from, $lte: to }, amount: { $ne: null } })
       .toArray();
 
-    const matches = candidates.filter((t: any) => Math.abs(Math.abs(t.amount) - group.orderTotal) <= 0.5);
+    const matches = (candidates as TransactionCandidate[])
+      .filter((t) => Math.abs(Math.abs(t.amount || 0) - group.orderTotal) <= 0.5);
 
     if (matches.length === 1) {
       const match = matches[0];
@@ -204,7 +220,7 @@ export async function POST(req: NextRequest) {
         orderId: group.orderId,
         orderDate: (group.orderDate || orderDate).toISOString(),
         orderTotal: group.orderTotal,
-        matches: matches.map((m: any) => m.transaction_id),
+        matches: matches.map((m) => m.transaction_id),
         items: group.items,
       });
     }

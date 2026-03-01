@@ -34,10 +34,10 @@ export default function AmazonImportPage() {
         body: JSON.stringify({ csv }),
       });
       if (!res.ok) throw new Error("Import failed");
-      const data = await res.json();
+      const data = await res.json() as ImportResponse;
       setResult(data);
-    } catch (e: any) {
-      setError(e?.message || "Import failed");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Import failed");
     }
     setLoading(false);
   };

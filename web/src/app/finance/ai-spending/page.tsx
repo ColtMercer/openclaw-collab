@@ -4,6 +4,27 @@ import { Card } from "@/components/finance/Card";
 
 export const dynamic = "force-dynamic";
 
+type VendorMonthlyRow = {
+  _id: {
+    description?: string;
+    month: string;
+  };
+  total: number;
+};
+
+type VendorSummary = {
+  _id?: string;
+  total: number;
+  count: number;
+  avgAmount: number;
+  lastSeen?: string | Date | null;
+};
+
+type MonthlyTotal = {
+  _id: string;
+  total: number;
+};
+
 function daysSince(date: Date | string | null | undefined): number {
   if (!date) return 999;
   return Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
@@ -59,10 +80,8 @@ export default async function AISpendingPage() {
   const lastMonthKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
 
   // Build vendor→month→total map
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const vmMap: Record<string, Record<string, number>> = {};
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  for (const row of vendorMonthly as any[]) {
+  for (const row of vendorMonthly as VendorMonthlyRow[]) {
     const vendor = cleanVendorName(row._id.description || "");
     if (!vmMap[vendor]) vmMap[vendor] = {};
     vmMap[vendor][row._id.month] = (vmMap[vendor][row._id.month] || 0) + row.total;
@@ -80,15 +99,14 @@ export default async function AISpendingPage() {
     .filter((v) => v.cur > 0 || v.prev > 0)
     .sort((a, b) => b.cur - a.cur);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const currentMonthTotal = monthlyTotals.find((m: any) => m._id === currentMonthKey)?.total || 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const lastMonthTotal = monthlyTotals.find((m: any) => m._id === lastMonthKey)?.total || 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allTimeTotal = byVendor.reduce((s: number, v: any) => s + v.total, 0);
-  const activeVendors = byVendor.filter((v: any) => daysSince(v.lastSeen) <= 45).length;
+  const monthlyTotalsTyped = monthlyTotals as MonthlyTotal[];
+  const byVendorTyped = byVendor as VendorSummary[];
+  const currentMonthTotal = monthlyTotalsTyped.find((m) => m._id === currentMonthKey)?.total || 0;
+  const lastMonthTotal = monthlyTotalsTyped.find((m) => m._id === lastMonthKey)?.total || 0;
+  const allTimeTotal = byVendorTyped.reduce((s, v) => s + v.total, 0);
+  const activeVendors = byVendorTyped.filter((v) => daysSince(v.lastSeen) <= 45).length;
 
-  const maxMonthly = Math.max(...monthlyTotals.map((m: any) => m.total), 1);
+  const maxMonthly = Math.max(...monthlyTotalsTyped.map((m) => m.total), 1);
 
   return (
     <div className="space-y-6">
@@ -131,7 +149,7 @@ export default async function AISpendingPage() {
           <h2 className="text-lg font-semibold mb-4">Monthly AI Spend</h2>
           <div className="flex items-end gap-2 h-32">
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            {monthlyTotals.map((m: any, i: number) => {
+            {monthlyTotalsTyped.map((m, i) => {
               const height = Math.round((m.total / maxMonthly) * 100);
               const isCurrentMonth = m._id === currentMonthKey;
               return (
@@ -169,7 +187,7 @@ export default async function AISpendingPage() {
             </thead>
             <tbody>
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {byVendor.map((v: any, i: number) => {
+              {byVendorTyped.map((v, i) => {
                 const vendor = cleanVendorName(v._id || "");
                 const emoji = VENDOR_EMOJIS[vendor] || "🔧";
                 const days = daysSince(v.lastSeen);
@@ -259,8 +277,7 @@ export default async function AISpendingPage() {
 
       {/* Kill List — inactive AI tools */}
       {(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const killList = (byVendor as any[]).filter((v: any) => {
+        const killList = byVendorTyped.filter((v) => {
           const days = daysSince(v.lastSeen);
           return days >= 30 && days <= 120;
         });
@@ -274,7 +291,7 @@ export default async function AISpendingPage() {
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {killList.map((v: any, i: number) => {
+              {killList.map((v, i) => {
                 const vendor = cleanVendorName(v._id || "");
                 const emoji = VENDOR_EMOJIS[vendor] || "🔧";
                 const days = daysSince(v.lastSeen);

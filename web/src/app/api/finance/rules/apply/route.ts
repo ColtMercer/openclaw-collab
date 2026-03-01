@@ -8,7 +8,7 @@ type RuleField = typeof RULE_FIELDS[number];
 type RuleMatchType = typeof RULE_MATCH_TYPES[number];
 
 type RuleDoc = {
-  _id: any;
+  _id: unknown;
   name?: string;
   field?: RuleField;
   match_type?: RuleMatchType;
