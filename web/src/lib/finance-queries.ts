@@ -565,3 +565,351 @@ export async function getCashFlowProjection() {
 
   return { accounts, monthlyData, recurringPatterns, incomeSources };
 }
+
+// ─── Savings Rate Timeline ─────────────────────────────────────────────────
+export async function getMonthlySavingsRate(months = 12) {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+  const pipeline = [
+    { $match: { date: { $gte: start }, amount: { $ne: null }, category: { $ne: "Transfer" } } },
+    { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+    {
+      $group: {
+        _id: "$monthKey",
+        income: { $sum: { $cond: [{ $gt: ["$amount", 0] }, "$amount", 0] } },
+        expenses: { $sum: { $cond: [{ $lt: ["$amount", 0] }, { $abs: "$amount" }, 0] } },
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ];
+  const rows = await db.collection("transactions").aggregate(pipeline).toArray();
+  return rows.map((r: any) => {
+    // Cap income at 15k to avoid RSU/bonus anomaly months skewing the rate
+    const cappedIncome = Math.min(r.income, 15000);
+    const net = cappedIncome - r.expenses;
+    const savingsRate = cappedIncome > 0 ? (net / cappedIncome) * 100 : 0;
+    return { ...r, cappedIncome, net, savingsRate };
+  });
+}
+
+// ─── Spending Velocity ─────────────────────────────────────────────────────
+export async function getSpendingVelocity() {
+  const db = await getDb();
+  const now = new Date();
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const daysInMonth = Math.floor((monthEnd.getTime() - monthStart.getTime()) / 86400000);
+  const daysElapsed = Math.max(1, Math.floor((now.getTime() - monthStart.getTime()) / 86400000));
+  const daysLeft = daysInMonth - daysElapsed;
+
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+
+  const [dailyThisMonth, categoryBreakdown, historicalMonthly] = await Promise.all([
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: monthStart, $lt: now }, amount: { $lt: 0 }, category: { $ne: "Transfer" } } },
+      { $addFields: { dayKey: { $dateToString: { format: "%Y-%m-%d", date: "$date" } } } },
+      { $group: { _id: "$dayKey", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: monthStart, $lt: now },
+          amount: { $lt: 0 },
+          category: { $nin: ["Transfer", null, ""] },
+        },
+      },
+      { $group: { _id: "$category", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { total: -1 } },
+      { $limit: 8 },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: threeMonthsAgo, $lt: monthStart }, amount: { $lt: 0 }, category: { $ne: "Transfer" } } },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      { $group: { _id: "$monthKey", total: { $sum: { $abs: "$amount" } } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+  ]);
+
+  const spentSoFar = dailyThisMonth.reduce((s: number, d: any) => s + d.total, 0);
+  const dailyBurnRate = spentSoFar / daysElapsed;
+  const projectedMonthEnd = dailyBurnRate * daysInMonth;
+  const avgHistorical =
+    historicalMonthly.length > 0
+      ? historicalMonthly.reduce((s: number, m: any) => s + m.total, 0) / historicalMonthly.length
+      : 0;
+
+  return {
+    daysInMonth,
+    daysElapsed,
+    daysLeft,
+    spentSoFar,
+    dailyBurnRate,
+    projectedMonthEnd,
+    avgHistorical,
+    dailyThisMonth,
+    categoryBreakdown,
+    historicalMonthly,
+  };
+}
+
+// ─── Budget History (6-month budget vs actual) ─────────────────────────────
+export async function getBudgetHistory(months = 6) {
+  const db = await getDb();
+  const now = new Date();
+
+  const monthSlots = Array.from({ length: months }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1);
+    return {
+      year: d.getFullYear(),
+      month: d.getMonth(),
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+      budgetKey: d.toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+    };
+  });
+
+  const [spendingByMonth, categories] = await Promise.all([
+    Promise.all(
+      monthSlots.map(({ year, month }) =>
+        db
+          .collection("transactions")
+          .aggregate([
+            {
+              $match: {
+                date: { $gte: new Date(year, month, 1), $lt: new Date(year, month + 1, 1) },
+                amount: { $lt: 0 },
+                category: { $nin: ["Transfer", null, ""] },
+              },
+            },
+            { $group: { _id: "$category", total: { $sum: { $abs: "$amount" } } } },
+          ])
+          .toArray()
+      )
+    ),
+    db.collection("categories").find({ type: "Expense" }).toArray(),
+  ]);
+
+  const catMap: Record<
+    string,
+    { group: string; budgets: Record<string, number>; actuals: Record<string, number>; totalActual: number }
+  > = {};
+
+  categories.forEach((c: any) => {
+    const budgets: Record<string, number> = {};
+    monthSlots.forEach((slot) => {
+      budgets[slot.key] = c.monthly_budgets?.[slot.budgetKey] || 0;
+    });
+    catMap[c.category] = { group: c.group || "", budgets, actuals: {}, totalActual: 0 };
+  });
+
+  spendingByMonth.forEach((monthData: any[], i: number) => {
+    const slot = monthSlots[i];
+    monthData.forEach((row: any) => {
+      if (!catMap[row._id]) {
+        catMap[row._id] = { group: "", budgets: {}, actuals: {}, totalActual: 0 };
+      }
+      catMap[row._id].actuals[slot.key] = row.total;
+      catMap[row._id].totalActual += row.total;
+    });
+  });
+
+  const rows = Object.entries(catMap)
+    .filter(([, v]) => v.totalActual > 0)
+    .sort(([, a], [, b]) => b.totalActual - a.totalActual)
+    .map(([category, v]) => ({ category, ...v }));
+
+  return { rows, monthSlots };
+}
+
+// ─── Peer Payments (Zelle / Venmo / Apple Cash / Cash App) ────────────────
+export async function getPeerPaymentData(months = 12) {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+
+  const descFilters = [
+    { description: { $regex: "zelle", $options: "i" } },
+    { description: { $regex: "venmo", $options: "i" } },
+    { description: { $regex: "apple cash", $options: "i" } },
+    { description: { $regex: "cash app", $options: "i" } },
+    { description: { $regex: "cashapp", $options: "i" } },
+    { description: { $regex: "send money", $options: "i" } },
+  ];
+
+  const [allTransactions, byMonth] = await Promise.all([
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: start }, amount: { $ne: null }, $or: descFilters } },
+      { $sort: { date: -1 } },
+      { $limit: 500 },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: start }, amount: { $lt: 0 }, $or: descFilters } },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      { $group: { _id: "$monthKey", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+  ]);
+
+  function extractRecipient(desc: string): string {
+    const d = desc.trim();
+    const toMatch = d.match(/(?:payment\s+to|transfer\s+to|sent\s+to|zelle\s+to)\s+(.+)/i);
+    if (toMatch) return toMatch[1].trim();
+    const zelleMatch = d.match(/zelle\s+([A-Za-z].+)/i);
+    if (zelleMatch) return zelleMatch[1].trim();
+    const venmoMatch = d.match(/venmo\s+(?:payment\s*[-\u2013]\s*|to\s+)?(.+)/i);
+    if (venmoMatch) return venmoMatch[1].replace(/^[-\s]+/, "").trim();
+    const appleMatch = d.match(/apple\s+cash\s+(.+)/i);
+    if (appleMatch) return appleMatch[1].trim();
+    return d;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recipientMap: Record<string, { total: number; count: number; lastDate: string; platform: string; transactions: any[] }> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const t of allTransactions as any[]) {
+    if ((t.amount || 0) >= 0) continue;
+    const recipient = extractRecipient(t.description || "");
+    const desc = (t.description || "").toLowerCase();
+    const platform = desc.includes("zelle") ? "Zelle"
+      : desc.includes("venmo") ? "Venmo"
+      : desc.includes("apple cash") ? "Apple Cash"
+      : desc.includes("cash app") || desc.includes("cashapp") ? "Cash App"
+      : "P2P";
+    if (!recipientMap[recipient]) {
+      recipientMap[recipient] = { total: 0, count: 0, lastDate: t.date, platform, transactions: [] };
+    }
+    recipientMap[recipient].total += Math.abs(t.amount);
+    recipientMap[recipient].count += 1;
+    if (new Date(t.date) > new Date(recipientMap[recipient].lastDate)) {
+      recipientMap[recipient].lastDate = t.date;
+    }
+    if (recipientMap[recipient].transactions.length < 5) {
+      recipientMap[recipient].transactions.push(t);
+    }
+  }
+
+  const byRecipient = Object.entries(recipientMap)
+    .map(([name, data]) => ({ name, ...data }))
+    .sort((a, b) => b.total - a.total);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalSent = byRecipient.reduce((s, r) => s + r.total, 0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const totalReceived = (allTransactions as any[])
+    .filter((t: any) => (t.amount || 0) > 0)
+    .reduce((s: number, t: any) => s + t.amount, 0);
+
+  return { byRecipient, byMonth, allTransactions, totalSent, totalReceived };
+}
+
+// ─── Restaurant Loyalty Map ────────────────────────────────────────────────
+export async function getRestaurantData(months = 12) {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+
+  const descFilters = [
+    { description: { $regex: "restaurant", $options: "i" } },
+    { description: { $regex: "bistro", $options: "i" } },
+    { description: { $regex: "grille?", $options: "i" } },
+    { description: { $regex: "tavern", $options: "i" } },
+    { description: { $regex: "steakhouse", $options: "i" } },
+    { description: { $regex: "sushi", $options: "i" } },
+    { description: { $regex: "ramen", $options: "i" } },
+    { description: { $regex: "kitchen", $options: "i" } },
+    { description: { $regex: "^tst\\*", $options: "i" } },
+    { description: { $regex: "^sq \\*", $options: "i" } },
+    { description: { $regex: "perry.?s", $options: "i" } },
+    { description: { $regex: "crown block", $options: "i" } },
+    { description: { $regex: "chill.*grapevine", $options: "i" } },
+    { description: { $regex: "whataburger", $options: "i" } },
+    { description: { $regex: "chipotle", $options: "i" } },
+    { description: { $regex: "wingstop", $options: "i" } },
+    { description: { $regex: "chick.?fil.?a", $options: "i" } },
+  ];
+
+  const [byMerchantRaw, byMonth, recentTransactions] = await Promise.all([
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: start },
+          amount: { $lt: 0 },
+          $or: [{ category: "Restaurants" }, ...descFilters],
+        },
+      },
+      {
+        $group: {
+          _id: "$description",
+          total: { $sum: { $abs: "$amount" } },
+          count: { $sum: 1 },
+          avgAmount: { $avg: { $abs: "$amount" } },
+          firstVisit: { $min: "$date" },
+          lastVisit: { $max: "$date" },
+        },
+      },
+      { $sort: { total: -1 } },
+      { $limit: 80 },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: start },
+          amount: { $lt: 0 },
+          $or: [{ category: "Restaurants" }, ...descFilters],
+        },
+      },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      { $group: { _id: "$monthKey", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: start },
+          amount: { $lt: 0 },
+          $or: [{ category: "Restaurants" }, ...descFilters],
+        },
+      },
+      { $sort: { date: -1 } },
+      { $limit: 30 },
+    ]).toArray(),
+  ]);
+
+  function cleanName(raw: string): string {
+    return raw
+      .replace(/^tst\s*\*/i, "")
+      .replace(/^sq\s+\*/i, "")
+      .replace(/\s+#\d+.*$/, "")
+      .replace(/\b\d{4,}\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mergedMap: Record<string, { name: string; total: number; count: number; firstVisit: any; lastVisit: any }> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const row of byMerchantRaw as any[]) {
+    const clean = cleanName(row._id || "");
+    if (!clean) continue;
+    if (!mergedMap[clean]) {
+      mergedMap[clean] = { name: clean, total: 0, count: 0, firstVisit: row.firstVisit, lastVisit: row.lastVisit };
+    }
+    mergedMap[clean].total += row.total;
+    mergedMap[clean].count += row.count;
+    if (new Date(row.firstVisit) < new Date(mergedMap[clean].firstVisit)) mergedMap[clean].firstVisit = row.firstVisit;
+    if (new Date(row.lastVisit) > new Date(mergedMap[clean].lastVisit)) mergedMap[clean].lastVisit = row.lastVisit;
+  }
+
+  const merchants = Object.values(mergedMap)
+    .map((m) => ({ ...m, avgAmount: m.total / m.count }))
+    .sort((a, b) => b.total - a.total);
+
+  const totalSpend = merchants.reduce((s, m) => s + m.total, 0);
+  const totalVisits = merchants.reduce((s, m) => s + m.count, 0);
+
+  return { merchants, byMonth, recentTransactions, totalSpend, totalVisits };
+}

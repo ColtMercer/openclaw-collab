@@ -24,8 +24,11 @@ const sections = [
     label: "Reports",
     links: [
       { href: "/finance/insights", label: "Insights", icon: "💡" },
+      { href: "/finance/velocity", label: "Spending Velocity", icon: "🔥" },
       { href: "/finance/heatmap", label: "Spending Heatmap", icon: "🗓️" },
+      { href: "/finance/restaurants", label: "Restaurants", icon: "🍽️" },
       { href: "/finance/delivery-vs-dinein", label: "Delivery vs Dining", icon: "🚗" },
+      { href: "/finance/peer-payments", label: "Peer Payments", icon: "💸" },
       { href: "/finance/convenience-stores", label: "Convenience Stores", icon: "🏪" },
       { href: "/finance/ai-spending", label: "AI Spend", icon: "🤖" },
       { href: "/finance/utilities", label: "Utilities", icon: "⚡" },
