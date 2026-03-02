@@ -4,8 +4,10 @@ import { Fragment, useEffect, useMemo, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import type { SkillItem } from "@/types"
 import { toast } from "sonner"
 
 type AgentFileMeta = {
@@ -200,6 +202,12 @@ export default function MissionControlPage() {
   )
   const [cronSaving, setCronSaving] = useState<Record<string, boolean>>({})
 
+  const [skills, setSkills] = useState<SkillItem[]>([])
+  const [skillsLoading, setSkillsLoading] = useState(true)
+  const [skillsError, setSkillsError] = useState<string | null>(null)
+  const [skillsQuery, setSkillsQuery] = useState("")
+  const [skillsReloadToken, setSkillsReloadToken] = useState(0)
+
   const selectedMeta = useMemo(
     () => files.find((file) => file.name === selectedFileName) ?? null,
     [files, selectedFileName]
@@ -239,6 +247,38 @@ export default function MissionControlPage() {
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+
+    async function loadSkills() {
+      setSkillsLoading(true)
+      setSkillsError(null)
+      try {
+        const response = await fetch("/api/mission-control/skills")
+        if (!response.ok) {
+          throw new Error("Failed to load skills.")
+        }
+        const data = (await response.json()) as SkillItem[]
+        if (!active) return
+        setSkills(data)
+      } catch (error) {
+        if (!active) return
+        const message =
+          error instanceof Error ? error.message : "Failed to load skills."
+        setSkillsError(message)
+        toast.error(message)
+      } finally {
+        if (active) setSkillsLoading(false)
+      }
+    }
+
+    void loadSkills()
+
+    return () => {
+      active = false
+    }
+  }, [skillsReloadToken])
 
   useEffect(() => {
     if (!selectedFileName) return
@@ -303,6 +343,24 @@ export default function MissionControlPage() {
       active = false
     }
   }, [])
+
+  const filteredSkills = useMemo(() => {
+    const query = skillsQuery.trim().toLowerCase()
+    if (!query) return skills
+    return skills.filter((skill) => {
+      const haystack = `${skill.name} ${skill.description}`.toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [skills, skillsQuery])
+
+  const userSkills = useMemo(
+    () => filteredSkills.filter((skill) => skill.source === "user"),
+    [filteredSkills]
+  )
+  const builtinSkills = useMemo(
+    () => filteredSkills.filter((skill) => skill.source === "builtin"),
+    [filteredSkills]
+  )
 
   async function handleSaveFile() {
     if (!selectedFileName) return
@@ -385,6 +443,7 @@ export default function MissionControlPage() {
         <TabsList className="w-fit">
           <TabsTrigger value="files">Agent Files</TabsTrigger>
           <TabsTrigger value="crons">Cron Jobs</TabsTrigger>
+          <TabsTrigger value="skills">Skills</TabsTrigger>
         </TabsList>
 
         <TabsContent value="files">
@@ -608,6 +667,143 @@ export default function MissionControlPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="skills">
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">
+                  Skills
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {skills.length} skills installed
+                </div>
+              </div>
+              <div className="w-full sm:w-72">
+                <Input
+                  placeholder="Search skills..."
+                  value={skillsQuery}
+                  onChange={(event) => setSkillsQuery(event.target.value)}
+                />
+              </div>
+            </div>
+
+            {skillsLoading ? (
+              <div className="rounded-xl border border-border/50 bg-black/20 p-5">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <Skeleton
+                      key={`skill-skeleton-${index}`}
+                      className="h-20 w-full rounded-lg"
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : skillsError ? (
+              <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-black/20 p-5">
+                <div className="text-sm text-rose-200">
+                  {skillsError}
+                </div>
+                <div>
+                  <Button
+                    variant="outline"
+                    onClick={() => setSkillsReloadToken((prev) => prev + 1)}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <details open className="rounded-xl border border-border/50 bg-black/20 p-5">
+                  <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                    Installed (User){" "}
+                    <span className="text-xs text-muted-foreground">
+                      ({userSkills.length})
+                    </span>
+                  </summary>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {userSkills.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        No user-installed skills found.
+                      </div>
+                    ) : (
+                      userSkills.map((skill) => (
+                        <div
+                          key={`${skill.source}-${skill.name}`}
+                          className="flex items-start gap-3 rounded-lg border border-border/50 bg-black/40 p-4"
+                        >
+                          <div className="text-2xl">
+                            {skill.emoji || "🧩"}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="font-semibold text-foreground">
+                                {skill.name}
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                              >
+                                User
+                              </Badge>
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              {skill.description || "No description provided."}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </details>
+
+                <details open className="rounded-xl border border-border/50 bg-black/20 p-5">
+                  <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                    Built-in{" "}
+                    <span className="text-xs text-muted-foreground">
+                      ({builtinSkills.length})
+                    </span>
+                  </summary>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {builtinSkills.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">
+                        No built-in skills found.
+                      </div>
+                    ) : (
+                      builtinSkills.map((skill) => (
+                        <div
+                          key={`${skill.source}-${skill.name}`}
+                          className="flex items-start gap-3 rounded-lg border border-border/50 bg-black/40 p-4"
+                        >
+                          <div className="text-2xl">
+                            {skill.emoji || "🧩"}
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="font-semibold text-foreground">
+                                {skill.name}
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="border-zinc-500/40 bg-zinc-500/10 text-zinc-200"
+                              >
+                                Built-in
+                              </Badge>
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              {skill.description || "No description provided."}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </details>
               </div>
             )}
           </div>

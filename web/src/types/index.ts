@@ -57,3 +57,11 @@ export type ChatMessage = {
   }
   createdAt: string
 }
+
+export type SkillItem = {
+  name: string
+  description: string
+  emoji: string
+  source: "builtin" | "user"
+  skillPath: string
+}
