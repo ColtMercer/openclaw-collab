@@ -71,6 +71,7 @@ export function KanbanBoard() {
   const [searchInput, setSearchInput] = React.useState("")
   const [debouncedQuery, setDebouncedQuery] = React.useState("")
   const [activeLabelFilters, setActiveLabelFilters] = React.useState<string[]>([])
+  const [activeProjectFilters, setActiveProjectFilters] = React.useState<string[]>([])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
@@ -181,14 +182,23 @@ export function KanbanBoard() {
     )
   }
 
+  const toggleProject = (projectName: string) => {
+    setActiveProjectFilters((prev) =>
+      prev.includes(projectName) ? prev.filter((p) => p !== projectName) : [...prev, projectName]
+    )
+  }
+
   const clearFilters = () => {
     setSearchInput("")
     setDebouncedQuery("")
     setActiveLabelFilters([])
+    setActiveProjectFilters([])
   }
 
   const hasActiveFilters =
-    searchInput.trim().length > 0 || activeLabelFilters.length > 0
+    searchInput.trim().length > 0 ||
+    activeLabelFilters.length > 0 ||
+    activeProjectFilters.length > 0
 
   const handleCreateIssue = async () => {
     if (!newIssue.title || !newIssue.project) return
@@ -784,6 +794,32 @@ export function KanbanBoard() {
             Clear All
           </Button>
         </div>
+        {projects.length > 1 && (
+          <div className="mt-3 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+            <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
+              Project
+            </span>
+            {projects.map((project) => {
+              const isActive = activeProjectFilters.includes(project.name)
+              return (
+                <button
+                  key={project._id}
+                  type="button"
+                  onClick={() => toggleProject(project.name)}
+                  aria-pressed={isActive}
+                  className={cn(
+                    "shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition",
+                    isActive
+                      ? "border-violet-500/60 bg-violet-500/20 text-violet-100"
+                      : "border-border/60 text-muted-foreground hover:border-border"
+                  )}
+                >
+                  {project.name}
+                </button>
+              )
+            })}
+          </div>
+        )}
         <div className="mt-3 flex flex-nowrap gap-3 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -844,7 +880,11 @@ export function KanbanBoard() {
 
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="space-y-10">
-          {projects.map((project) => (
+          {projects
+            .filter((project) =>
+              activeProjectFilters.length === 0 || activeProjectFilters.includes(project.name)
+            )
+            .map((project) => (
             <div key={project._id} className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
