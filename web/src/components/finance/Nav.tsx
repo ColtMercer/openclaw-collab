@@ -25,6 +25,7 @@ const sections = [
     links: [
       { href: "/finance/insights", label: "Insights", icon: "💡" },
       { href: "/finance/velocity", label: "Spending Velocity", icon: "🔥" },
+      { href: "/finance/anomalies", label: "Anomalies", icon: "🚨" },
       { href: "/finance/heatmap", label: "Spending Heatmap", icon: "🗓️" },
       { href: "/finance/restaurants", label: "Restaurants", icon: "🍽️" },
       { href: "/finance/delivery-vs-dinein", label: "Delivery vs Dining", icon: "🚗" },

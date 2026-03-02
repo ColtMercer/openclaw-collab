@@ -658,6 +658,145 @@ export async function getSpendingVelocity() {
   };
 }
 
+// ─── Spending Anomaly Detector ────────────────────────────────────────────
+export async function getSpendingAnomalies() {
+  const db = await getDb();
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const priorThreeStart = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+
+  const UNKNOWN_CATEGORY_AVG_THRESHOLD = 200;
+  const NEW_MERCHANT_MIN_TOTAL = 50;
+
+  const [
+    thisMonthByCategory,
+    priorThreeByCategory,
+    priorThreeAvgTxns,
+    thisMonthTransactions,
+    thisMonthMerchantTotals,
+    merchantFirstSeen,
+  ] = await Promise.all([
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: monthStart, $lt: monthEnd }, amount: { $lt: 0 }, category: { $nin: ["Transfer", null, ""] } } },
+      { $group: { _id: "$category", total: { $sum: { $abs: "$amount" } } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: priorThreeStart, $lt: monthStart }, amount: { $lt: 0 }, category: { $nin: ["Transfer", null, ""] } } },
+      { $group: { _id: "$category", total: { $sum: { $abs: "$amount" } } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: priorThreeStart, $lt: monthStart }, amount: { $lt: 0 }, category: { $nin: ["Transfer", null, ""] } } },
+      { $group: { _id: "$category", avgAmount: { $avg: { $abs: "$amount" } } } },
+    ]).toArray(),
+    db.collection("transactions").find(
+      {
+        date: { $gte: monthStart, $lt: monthEnd },
+        amount: { $lt: 0 },
+        category: { $nin: ["Transfer", null, ""] },
+        description: { $nin: [null, ""] },
+      },
+      { projection: { date: 1, description: 1, category: 1, amount: 1 } }
+    ).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: monthStart, $lt: monthEnd },
+          amount: { $lt: 0 },
+          category: { $nin: ["Transfer", null, ""] },
+          description: { $nin: [null, ""] },
+        },
+      },
+      { $group: { _id: "$description", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { total: -1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { amount: { $lt: 0 }, category: { $nin: ["Transfer", null, ""] }, description: { $nin: [null, ""] } } },
+      { $group: { _id: "$description", firstSeen: { $min: "$date" } } },
+    ]).toArray(),
+  ]);
+
+  const priorTotals = new Map<string, number>();
+  (priorThreeByCategory as Array<{ _id: string; total: number }>).forEach((row) => {
+    priorTotals.set(row._id, row.total / 3);
+  });
+
+  const categorySpikes = (thisMonthByCategory as Array<{ _id: string; total: number }>)
+    .map((row) => {
+      const avgPrior3 = priorTotals.get(row._id) || 0;
+      const ratio = avgPrior3 > 0 ? row.total / avgPrior3 : 0;
+      return {
+        category: row._id,
+        thisMonth: row.total,
+        avgPrior3,
+        ratio,
+        delta: row.total - avgPrior3,
+      };
+    })
+    .filter((row) => row.ratio >= 1.4)
+    .sort((a, b) => b.ratio - a.ratio)
+    .slice(0, 10);
+
+  const categoryAvgTxnMap = new Map<string, number>();
+  (priorThreeAvgTxns as Array<{ _id: string; avgAmount: number }>).forEach((row) => {
+    categoryAvgTxnMap.set(row._id, row.avgAmount || 0);
+  });
+
+  const largeTransactions = (thisMonthTransactions as Array<{ amount?: number; description?: string; category?: string; date?: Date }>)
+    .map((t) => {
+      const amountAbs = Math.abs(t.amount || 0);
+      const avgAmount = t.category ? (categoryAvgTxnMap.get(t.category) || 0) : 0;
+      const ratio = avgAmount > 0 ? amountAbs / avgAmount : 0;
+      return {
+        date: t.date,
+        description: t.description || "",
+        category: t.category || "Uncategorized",
+        amount: amountAbs,
+        avgCategoryAmount: avgAmount,
+        ratio,
+      };
+    })
+    .filter((t) => (t.avgCategoryAmount > 0 ? t.ratio > 3 : t.amount > UNKNOWN_CATEGORY_AVG_THRESHOLD))
+    .sort((a, b) => (b.ratio || 0) - (a.ratio || 0) || b.amount - a.amount)
+    .slice(0, 15);
+
+  const firstSeenMap = new Map<string, Date>();
+  (merchantFirstSeen as Array<{ _id: string; firstSeen: Date }>).forEach((row) => {
+    if (row._id) firstSeenMap.set(row._id, row.firstSeen);
+  });
+
+  const newMerchants = (thisMonthMerchantTotals as Array<{ _id: string; total: number }>)
+    .map((row) => {
+      const firstSeen = firstSeenMap.get(row._id);
+      return {
+        merchant: row._id,
+        total: row.total,
+        firstSeen,
+      };
+    })
+    .filter((row) => {
+      if (!row.firstSeen) return false;
+      return row.firstSeen >= monthStart && row.firstSeen < monthEnd && row.total > NEW_MERCHANT_MIN_TOTAL;
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+
+  return {
+    categorySpikes,
+    largeTransactions,
+    newMerchants,
+    summary: {
+      totalCategorySpikes: categorySpikes.length,
+      totalLargeTransactions: largeTransactions.length,
+      totalNewMerchants: newMerchants.length,
+    },
+    thresholds: {
+      unknownCategoryAvg: UNKNOWN_CATEGORY_AVG_THRESHOLD,
+      newMerchantMinTotal: NEW_MERCHANT_MIN_TOTAL,
+    },
+  };
+}
+
 // ─── Budget History (6-month budget vs actual) ─────────────────────────────
 export async function getBudgetHistory(months = 6) {
   const db = await getDb();
