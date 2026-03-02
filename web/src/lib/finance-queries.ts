@@ -567,6 +567,75 @@ export async function getCashFlowProjection() {
   return { accounts, monthlyData, recurringPatterns, incomeSources };
 }
 
+// ─── Income Breakdown ──────────────────────────────────────────────────────
+export async function getIncomeBreakdown() {
+  const db = await getDb();
+  const now = new Date();
+
+  const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+
+  const [monthlyRows, incomeSources, ytdRows, largestTransactions] = await Promise.all([
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: start }, amount: { $gt: 0 }, category: { $ne: "Transfer" } } },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      { $group: { _id: "$monthKey", total: { $sum: "$amount" }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { amount: { $gt: 0 }, category: { $ne: "Transfer" } } },
+      {
+        $group: {
+          _id: "$description",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 },
+          avgAmount: { $avg: "$amount" },
+          lastDate: { $max: "$date" },
+        },
+      },
+      { $project: { _id: 0, description: "$_id", total: 1, count: 1, avgAmount: 1, lastDate: 1 } },
+      { $sort: { total: -1 } },
+      { $limit: 20 },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { date: { $gte: yearStart, $lt: now }, amount: { $gt: 0 }, category: { $ne: "Transfer" } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]).toArray(),
+    db.collection("transactions")
+      .find({ amount: { $gt: 0 }, category: { $ne: "Transfer" } })
+      .sort({ amount: -1 })
+      .limit(10)
+      .toArray(),
+  ]);
+
+  const monthSlots = Array.from({ length: 12 }, (_, i) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 11 + i, 1);
+    return { key: monthKey(date) };
+  });
+  const monthMap = new Map((monthlyRows as Array<{ _id: string; total: number; count: number }>).map((r) => [r._id, r]));
+  const monthlyIncome = monthSlots.map((slot) => ({
+    month: slot.key,
+    total: monthMap.get(slot.key)?.total || 0,
+    count: monthMap.get(slot.key)?.count || 0,
+  }));
+
+  const thisMonthKey = monthKey(now);
+  const lastMonthKey = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const thisMonthTotal = monthMap.get(thisMonthKey)?.total || 0;
+  const lastMonthTotal = monthMap.get(lastMonthKey)?.total || 0;
+  const avgMonthly = monthlyIncome.reduce((s, m) => s + m.total, 0) / monthlyIncome.length;
+  const totalYTD = (ytdRows as Array<{ total: number }>)[0]?.total || 0;
+  const momChange = lastMonthTotal > 0 ? (thisMonthTotal - lastMonthTotal) / lastMonthTotal : 0;
+
+  return {
+    monthlyIncome,
+    incomeSources,
+    stats: { thisMonthTotal, lastMonthTotal, avgMonthly, totalYTD, momChange },
+    largestTransactions,
+  };
+}
+
 // ─── Savings Rate Timeline ─────────────────────────────────────────────────
 export async function getMonthlySavingsRate(months = 12) {
   const db = await getDb();
