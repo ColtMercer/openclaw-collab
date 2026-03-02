@@ -60,7 +60,7 @@ function getRunwayDate(base: Date, runwayDays: number) {
 }
 
 export default async function CashFlowPage() {
-  const { accounts, monthlyData, recurringPatterns, incomeSources } = await getCashFlowProjection() as CashflowProjection;
+  const { accounts, monthlyData, recurringPatterns, incomeSources } = await getCashFlowProjection() as unknown as CashflowProjection;
 
   // Total liquid balance
   const totalBalance = accounts.reduce((s, a) => s + (a.last_balance || 0), 0);

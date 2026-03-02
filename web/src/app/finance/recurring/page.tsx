@@ -30,7 +30,7 @@ export default async function RecurringPage() {
     getRecurringChangeData(),
   ]);
 
-  const monthly = (patterns as RecurringPattern[]).filter((p) => p.frequency === "monthly");
+  const monthly = (patterns as unknown as RecurringPattern[]).filter((p) => p.frequency === "monthly");
   const income = monthly.filter((p) => p.is_income);
   const expenses = monthly.filter((p) => !p.is_income);
 

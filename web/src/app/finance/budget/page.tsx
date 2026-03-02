@@ -38,7 +38,7 @@ export default async function BudgetPage() {
   (spending as CategorySpending[]).forEach((s) => { spendingMap[s._id] = s.total; });
 
   // Build budget items from categories that have budgets
-  const budgetItems: BudgetItem[] = (categories as Category[])
+  const budgetItems: BudgetItem[] = (categories as unknown as Category[])
     .filter((c) => c.type === "Expense")
     .map((c) => {
       const budget = c.monthly_budgets?.[monthKey] || 0;

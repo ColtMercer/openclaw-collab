@@ -57,9 +57,10 @@ export async function getTransactions(params: {
   if (params.category) filter.category = params.category;
   if (params.account) filter.account = params.account;
   if (params.dateFrom || params.dateTo) {
-    filter.date = {};
-    if (params.dateFrom) filter.date.$gte = new Date(params.dateFrom);
-    if (params.dateTo) filter.date.$lte = new Date(params.dateTo);
+    const dateFilter: Record<string, Date> = {};
+    if (params.dateFrom) dateFilter.$gte = new Date(params.dateFrom);
+    if (params.dateTo) dateFilter.$lte = new Date(params.dateTo);
+    filter.date = dateFilter;
   }
 
   const page = params.page || 1;
@@ -584,7 +585,7 @@ export async function getMonthlySavingsRate(months = 12) {
     },
     { $sort: { _id: 1 } },
   ];
-  type MonthlySavingsRow = { income: number; expenses: number } & Record<string, unknown>;
+  type MonthlySavingsRow = { _id: string; income: number; expenses: number } & Record<string, unknown>;
   const rows = await db.collection("transactions").aggregate(pipeline).toArray() as MonthlySavingsRow[];
   return rows.map((r) => {
     // Cap income at 15k to avoid RSU/bonus anomaly months skewing the rate
@@ -699,7 +700,7 @@ export async function getBudgetHistory(months = 6) {
     { group: string; budgets: Record<string, number>; actuals: Record<string, number>; totalActual: number }
   > = {};
 
-  (categories as Array<{ category: string; group?: string; monthly_budgets?: Record<string, number> }>).forEach((c) => {
+  (categories as unknown as Array<{ category: string; group?: string; monthly_budgets?: Record<string, number> }>).forEach((c) => {
     const budgets: Record<string, number> = {};
     monthSlots.forEach((slot) => {
       budgets[slot.key] = c.monthly_budgets?.[slot.budgetKey] || 0;
@@ -782,7 +783,7 @@ export async function getPeerPaymentData(months = 12) {
     if (!recipientMap[recipient]) {
       recipientMap[recipient] = { total: 0, count: 0, lastDate: t.date, platform, transactions: [] };
     }
-    recipientMap[recipient].total += Math.abs(t.amount);
+    recipientMap[recipient].total += Math.abs(t.amount ?? 0);
     recipientMap[recipient].count += 1;
     if (new Date(t.date) > new Date(recipientMap[recipient].lastDate)) {
       recipientMap[recipient].lastDate = t.date;

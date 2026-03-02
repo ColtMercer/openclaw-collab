@@ -35,7 +35,7 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
     getDistinctCategories(),
     getDistinctAccounts(),
   ]);
-  const typedResult = result as TransactionResult;
+  const typedResult = result as unknown as TransactionResult;
 
   const buildUrl = (overrides: Record<string, string>) => {
     const p = new URLSearchParams({ search, category, account, dateFrom, dateTo, page: "1", ...overrides });

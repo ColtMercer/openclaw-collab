@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ObjectId } from "mongodb";
 import { getDb } from "@/lib/finance-db";
 
 type AmazonItem = {
@@ -16,7 +17,7 @@ type OrderGroup = {
 };
 
 type TransactionCandidate = {
-  _id: unknown;
+  _id: ObjectId;
   amount?: number;
   transaction_id?: string;
 };

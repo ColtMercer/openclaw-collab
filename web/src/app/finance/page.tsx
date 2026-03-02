@@ -87,7 +87,7 @@ export default async function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {(recent as Transaction[]).map((t) => (
+              {(recent as unknown as Transaction[]).map((t) => (
                 <SimpleTransactionRow key={t.transaction_id} t={JSON.parse(JSON.stringify(t))} />
               ))}
             </tbody>
