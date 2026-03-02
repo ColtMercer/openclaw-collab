@@ -40,6 +40,71 @@ export async function getCategorySpending(year?: number, month?: number) {
   return db.collection("transactions").aggregate(pipeline).toArray();
 }
 
+export async function getCategoryDetail(name: string, months = 12) {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const categoryRegex = new RegExp(`^${escaped}$`, "i");
+  const baseMatch = { amount: { $lt: 0 }, category: { $regex: categoryRegex } };
+
+  const [transactions, monthlyRaw, topMerchants, statsRaw] = await Promise.all([
+    db.collection("transactions").find(baseMatch).sort({ date: -1 }).limit(100).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: { ...baseMatch, date: { $gte: start } } },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      { $group: { _id: "$monthKey", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: baseMatch },
+      { $group: { _id: "$description", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { total: -1 } },
+      { $limit: 10 },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      { $match: baseMatch },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $abs: "$amount" } },
+          count: { $sum: 1 },
+          maxSingle: { $max: { $abs: "$amount" } },
+        },
+      },
+    ]).toArray(),
+  ]);
+
+  const monthSlots = Array.from({ length: months }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const monthlyMap: Record<string, { total: number; count: number }> = {};
+  (monthlyRaw as Array<{ _id: string; total: number; count: number }>).forEach((row) => {
+    monthlyMap[row._id] = { total: row.total, count: row.count };
+  });
+  const monthlyTrend = monthSlots.map((key) => ({
+    month: key,
+    total: monthlyMap[key]?.total || 0,
+    count: monthlyMap[key]?.count || 0,
+  }));
+
+  const totalAllTime = statsRaw[0]?.total || 0;
+  const transactionCount = statsRaw[0]?.count || 0;
+  const maxSingle = statsRaw[0]?.maxSingle || 0;
+  const avgMonthly = months > 0
+    ? monthlyTrend.reduce((s, m) => s + m.total, 0) / months
+    : 0;
+
+  return {
+    transactions,
+    monthlyTrend,
+    topMerchants,
+    stats: { avgMonthly, totalAllTime, transactionCount, maxSingle },
+  };
+}
+
 export async function getRecentTransactions(limit = 20) {
   const db = await getDb();
   return db.collection("transactions").find({ amount: { $ne: null } }).sort({ date: -1 }).limit(limit).toArray();

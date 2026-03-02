@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getInsightsData } from "@/lib/finance-queries";
 import { formatCurrency } from "@/lib/utils";
 import { DowChart } from "@/components/finance/Charts";
@@ -82,7 +83,14 @@ export default async function InsightsPage() {
           <tbody>
             {catTotals.map(({ cat, total }) => (
               <tr key={cat} className="border-b border-zinc-800/50 hover:bg-zinc-800/30">
-                <td className="py-2 font-medium">{cat}</td>
+                <td className="py-2 font-medium">
+                  <Link
+                    href={`/finance/category/${encodeURIComponent(cat)}`}
+                    className="hover:text-indigo-300 transition-colors"
+                  >
+                    {cat}
+                  </Link>
+                </td>
                 {trendMonths.map((m) => (
                   <td key={m} className="py-2 text-right text-zinc-400 px-3">
                     {trendCategories[cat][m] ? formatCurrency(trendCategories[cat][m]) : "-"}

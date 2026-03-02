@@ -11,6 +11,7 @@ type MonthlyBarDatum = { _id: string; income: number; expenses: number };
 type CategoryDatum = { _id: string; total: number };
 type NetWorthDatum = { month: string; net: number };
 type DowDatum = { _id: number | string; total: number; count: number };
+type SpendMonthDatum = { label: string; total: number };
 
 export function MonthlyBarChart({ data }: { data: MonthlyBarDatum[] }) {
   return (
@@ -70,6 +71,19 @@ export function DowChart({ data }: { data: DowDatum[] }) {
         <YAxis stroke="#71717a" fontSize={12} tickFormatter={(v) => `$${v.toFixed(0)}`} />
         <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => formatCurrency(Number(v))} />
         <Bar dataKey="avg" name="Avg Spend" fill="#8b5cf6" radius={[4,4,0,0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function SpendBarChart({ data }: { data: SpendMonthDatum[] }) {
+  return (
+    <ResponsiveContainer width="100%" height={300}>
+      <BarChart data={data}>
+        <XAxis dataKey="label" stroke="#71717a" fontSize={12} />
+        <YAxis stroke="#71717a" fontSize={12} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: unknown) => formatCurrency(Number(v))} />
+        <Bar dataKey="total" name="Spend" fill="#ef4444" radius={[4, 4, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
