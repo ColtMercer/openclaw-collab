@@ -1,152 +1,262 @@
-import Link from "next/link";
-import { repoUrl } from "@/lib/config";
+"use client"
+
+import * as React from "react"
+import Link from "next/link"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
 import {
-  getPullRequestStatus,
-  listOpenPullRequests,
-  listPullRequestReviews,
-  PullRequestStatus,
-} from "@/lib/github";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
+import { MarkdownEditor } from "@/components/articles/MarkdownEditor"
+import { ARTICLE_STATUSES } from "@/lib/constants"
+import type { Article, ArticleStatus, Project } from "@/types"
+import { cn } from "@/lib/utils"
 
-const STATUS_STYLES: Record<
-  PullRequestStatus,
-  { label: string; className: string }
-> = {
-  draft: {
-    label: "Draft",
-    className: "bg-zinc-100 text-zinc-700",
-  },
-  open: {
-    label: "Open",
-    className: "bg-sky-100 text-sky-700",
-  },
-  approved: {
-    label: "Approved",
-    className: "bg-emerald-100 text-emerald-700",
-  },
-  "changes-requested": {
-    label: "Changes Requested",
-    className: "bg-rose-100 text-rose-700",
-  },
-};
+const ALL_STATUS = "All"
 
-export default async function ArticlesPage() {
-  let errorMessage: string | null = null;
-  let items: {
-    id: number;
-    number: number;
-    title: string;
-    author: string;
-    url: string;
-    status: PullRequestStatus;
-  }[] = [];
+const statusStyles: Record<ArticleStatus, string> = {
+  Draft: "bg-slate-500/20 text-slate-200",
+  "In Review": "bg-amber-500/20 text-amber-200",
+  "Revision Needed": "bg-rose-500/20 text-rose-200",
+  "Ready to Publish": "bg-emerald-500/20 text-emerald-200",
+  Published: "bg-indigo-500/20 text-indigo-200",
+}
 
-  try {
-    const pullRequests = await listOpenPullRequests();
-    const reviewsByPr = await Promise.all(
-      pullRequests.map((pr) =>
-        listPullRequestReviews(pr.number).catch(() => [])
-      )
-    );
+export default function ArticlesPage() {
+  const [articles, setArticles] = React.useState<Article[]>([])
+  const [projects, setProjects] = React.useState<Project[]>([])
+  const [activeStatus, setActiveStatus] = React.useState<string>(ALL_STATUS)
+  const [open, setOpen] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
+  const [isCreating, setIsCreating] = React.useState(false)
+  const [form, setForm] = React.useState({
+    title: "",
+    content: "",
+    project: "",
+  })
 
-    items = pullRequests.map((pr, index) => {
-      const status = getPullRequestStatus(pr, reviewsByPr[index]);
-      return {
-        id: pr.id,
-        number: pr.number,
-        title: pr.title,
-        author: pr.user.login,
-        url: pr.html_url,
-        status,
-      };
-    });
-  } catch (error) {
-    errorMessage =
-      error instanceof Error
-        ? error.message
-        : "Unable to load GitHub pull requests.";
+  const fetchArticles = React.useCallback(async (status?: string) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const query =
+        status && status !== ALL_STATUS
+          ? `?status=${encodeURIComponent(status)}`
+          : ""
+      const response = await fetch(`/api/articles${query}`)
+      if (!response.ok) throw new Error("Failed to load articles")
+      const data = await response.json()
+      setArticles(data)
+    } catch (err) {
+      setError("Unable to load articles. Please retry.")
+      toast.error("Failed to fetch articles.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const fetchProjects = React.useCallback(async () => {
+    try {
+      const response = await fetch("/api/projects")
+      if (!response.ok) throw new Error("Failed to load projects")
+      const data = await response.json()
+      setProjects(data)
+    } catch (err) {
+      toast.error("Failed to load projects.")
+    }
+  }, [])
+
+  React.useEffect(() => {
+    void fetchArticles(activeStatus)
+  }, [activeStatus, fetchArticles])
+
+  React.useEffect(() => {
+    void fetchProjects()
+  }, [fetchProjects])
+
+  React.useEffect(() => {
+    if (projects.length > 0 && !form.project) {
+      setForm((prev) => ({ ...prev, project: projects[0].name }))
+    }
+  }, [projects, form.project])
+
+  const handleCreate = async () => {
+    if (!form.title || !form.project) return
+    setIsCreating(true)
+    try {
+      const response = await fetch("/api/articles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: form.title,
+          content: form.content,
+          project: form.project,
+          status: "Draft",
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to create article")
+      }
+
+      const created = await response.json()
+      setArticles((prev) => [created, ...prev])
+      setForm({ title: "", content: "", project: form.project })
+      setOpen(false)
+      toast.success("Article created.")
+    } catch (err) {
+      toast.error("Could not create the article.")
+    } finally {
+      setIsCreating(false)
+    }
   }
 
   return (
-    <section className="space-y-8">
-      <header className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-          Article Workflow
-        </p>
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-semibold text-zinc-900">Articles</h1>
-            <p className="max-w-xl text-sm text-zinc-600">
-              Review open pull requests and keep article drafts moving through
-              the pipeline.
-            </p>
-          </div>
-          {repoUrl ? (
-            <Link
-              className="rounded-full border border-zinc-200 px-4 py-2 text-xs font-semibold text-zinc-700 transition hover:border-zinc-300 hover:text-zinc-900"
-              href={`${repoUrl}/pulls`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              View All PRs
-            </Link>
-          ) : null}
+    <section className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Article Workspace</h1>
+          <p className="text-sm text-muted-foreground">
+            Manage editorial workflows with structured review states.
+          </p>
         </div>
-      </header>
-
-      {errorMessage ? (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          {errorMessage}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {items.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-zinc-200 bg-white px-4 py-10 text-center text-sm text-zinc-500">
-              No open pull requests right now.
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button>New Article</Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Create article</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <Input
+                placeholder="Title"
+                value={form.title}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, title: event.target.value }))
+                }
+              />
+              <Select
+                value={form.project}
+                onValueChange={(value) =>
+                  setForm((prev) => ({ ...prev, project: value }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Project" />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project._id} value={project.name}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <MarkdownEditor
+                value={form.content}
+                onChange={(value) =>
+                  setForm((prev) => ({ ...prev, content: value ?? "" }))
+                }
+              />
+              <Button onClick={handleCreate} disabled={isCreating}>
+                {isCreating ? "Creating..." : "Create article"}
+              </Button>
             </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {items.map((item) => {
-                const statusStyle = STATUS_STYLES[item.status];
-                return (
-                  <article
-                    key={item.id}
-                    className="flex h-full flex-col justify-between rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
-                            PR #{item.number}
-                          </p>
-                          <h2 className="text-base font-semibold text-zinc-900">
-                            {item.title}
-                          </h2>
-                        </div>
-                        <span
-                          className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${statusStyle.className}`}
-                        >
-                          {statusStyle.label}
-                        </span>
-                      </div>
-                      <p className="text-xs text-zinc-500">by {item.author}</p>
-                    </div>
-                    <div className="pt-4">
-                      <Link
-                        className="text-xs font-semibold text-zinc-600 hover:text-zinc-900"
-                        href={item.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                      >
-                        Open on GitHub
-                      </Link>
-                    </div>
-                  </article>
-                );
-              })}
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <Tabs value={activeStatus} onValueChange={setActiveStatus}>
+        <TabsList className="flex flex-wrap">
+          {[ALL_STATUS, ...ARTICLE_STATUSES].map((status) => (
+            <TabsTrigger key={status} value={status}>
+              {status}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      {loading && (
+        <div className="grid gap-4">
+          {[0, 1, 2].map((item) => (
+            <div
+              key={item}
+              className="rounded-2xl border border-border/60 bg-card/70 p-4"
+            >
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="mt-3 h-4 w-64" />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-2xl border border-border/60 bg-card/60 p-6 text-center">
+          <h2 className="text-lg font-semibold text-foreground">Articles offline</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+          <Button className="mt-4" onClick={() => void fetchArticles(activeStatus)}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="grid gap-4">
+          {articles.map((article) => (
+            <Link
+              key={article._id}
+              href={`/articles/${article._id}`}
+              className="rounded-2xl border border-border/60 bg-card/70 p-4 transition hover:border-border"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">
+                    {article.title}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {article.project} - Updated{" "}
+                    {new Date(article.updatedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <Badge
+                  variant="secondary"
+                  className={cn("text-xs", statusStyles[article.status])}
+                >
+                  {article.status}
+                </Badge>
+              </div>
+            </Link>
+          ))}
+          {articles.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-border/50 p-6 text-center">
+              <h2 className="text-lg font-semibold text-foreground">No articles yet</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Draft an article to start your editorial workflow.
+              </p>
+              <Button className="mt-4" onClick={() => setOpen(true)}>
+                New Article
+              </Button>
             </div>
           )}
         </div>
       )}
     </section>
-  );
+  )
 }
