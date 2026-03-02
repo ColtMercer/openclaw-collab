@@ -68,6 +68,9 @@ export function KanbanBoard() {
   const [isDeletingIssue, setIsDeletingIssue] = React.useState(false)
   const [isCreatingIssue, setIsCreatingIssue] = React.useState(false)
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
+  const [searchInput, setSearchInput] = React.useState("")
+  const [debouncedQuery, setDebouncedQuery] = React.useState("")
+  const [activeLabelFilters, setActiveLabelFilters] = React.useState<string[]>([])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
@@ -123,6 +126,69 @@ export function KanbanBoard() {
       setNewIssue((prev) => ({ ...prev, project: projects[0].name }))
     }
   }, [projects, newIssue.project])
+
+  React.useEffect(() => {
+    const handle = setTimeout(() => {
+      setDebouncedQuery(searchInput.trim().toLowerCase())
+    }, 200)
+    return () => clearTimeout(handle)
+  }, [searchInput])
+
+  const labelBuckets = React.useMemo(() => {
+    const typeLabels = new Set<string>()
+    const priorityLabels = new Set<string>()
+    issues.forEach((issue) => {
+      const labels = issue.labels ?? []
+      labels.forEach((label) => {
+        const name = typeof label === "string" ? label : label.name
+        if (!name) return
+        if (name.startsWith("type/")) typeLabels.add(name)
+        if (name.startsWith("priority/")) priorityLabels.add(name)
+      })
+    })
+    return {
+      type: Array.from(typeLabels).sort(),
+      priority: Array.from(priorityLabels).sort(),
+    }
+  }, [issues])
+
+  const isFiltering = debouncedQuery.length > 0 || activeLabelFilters.length > 0
+
+  const getLabelNames = React.useCallback((issue: Issue) => {
+    const labels = issue.labels ?? []
+    return labels
+      .map((label) => (typeof label === "string" ? label : label.name))
+      .filter(Boolean) as string[]
+  }, [])
+
+  const matchesFilters = React.useCallback(
+    (issue: Issue) => {
+      const matchesSearch =
+        debouncedQuery.length === 0 ||
+        issue.title.toLowerCase().includes(debouncedQuery)
+      if (!matchesSearch) return false
+
+      if (activeLabelFilters.length === 0) return true
+      const labels = getLabelNames(issue)
+      return activeLabelFilters.every((label) => labels.includes(label))
+    },
+    [activeLabelFilters, debouncedQuery, getLabelNames]
+  )
+
+  const toggleLabel = (label: string) => {
+    setActiveLabelFilters((prev) =>
+      prev.includes(label) ? prev.filter((item) => item !== label) : [...prev, label]
+    )
+  }
+
+  const clearFilters = () => {
+    setSearchInput("")
+    setDebouncedQuery("")
+    setActiveLabelFilters([])
+  }
+
+  const hasActiveFilters =
+    searchInput.trim().length > 0 || activeLabelFilters.length > 0
 
   const handleCreateIssue = async () => {
     if (!newIssue.title || !newIssue.project) return
@@ -700,6 +766,82 @@ export function KanbanBoard() {
         </div>
       )}
 
+      <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="flex-1">
+              <Input
+                placeholder="Search issue titles..."
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+              />
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {hasActiveFilters ? "Filters active" : "No filters applied"}
+            </div>
+          </div>
+          <Button variant="secondary" onClick={clearFilters} disabled={!hasActiveFilters}>
+            Clear All
+          </Button>
+        </div>
+        <div className="mt-3 flex flex-nowrap gap-3 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Type
+            </span>
+            {labelBuckets.type.map((label) => {
+              const isActive = activeLabelFilters.includes(label)
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => toggleLabel(label)}
+                  aria-pressed={isActive}
+                  className={cn(
+                    "shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition",
+                    isActive
+                      ? "border-blue-500/60 bg-blue-500/20 text-blue-100"
+                      : "border-border/60 text-muted-foreground hover:border-border"
+                  )}
+                >
+                  {label}
+                </button>
+              )
+            })}
+            {labelBuckets.type.length === 0 && (
+              <span className="text-xs text-muted-foreground">No type labels</span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Priority
+            </span>
+            {labelBuckets.priority.map((label) => {
+              const isActive = activeLabelFilters.includes(label)
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => toggleLabel(label)}
+                  aria-pressed={isActive}
+                  className={cn(
+                    "shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition",
+                    isActive
+                      ? "border-blue-500/60 bg-blue-500/20 text-blue-100"
+                      : "border-border/60 text-muted-foreground hover:border-border"
+                  )}
+                >
+                  {label}
+                </button>
+              )
+            })}
+            {labelBuckets.priority.length === 0 && (
+              <span className="text-xs text-muted-foreground">No priority labels</span>
+            )}
+          </div>
+        </div>
+      </div>
+
       <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
         <div className="space-y-10">
           {projects.map((project) => (
@@ -710,15 +852,27 @@ export function KanbanBoard() {
                   <p className="text-xs text-muted-foreground">{project.slug}</p>
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {issues.filter((issue) => issue.project === project.name).length} issues
+                  {(() => {
+                    const projectIssues = issues.filter(
+                      (issue) => issue.project === project.name
+                    )
+                    const matching = projectIssues.filter(matchesFilters)
+                    if (!isFiltering) {
+                      return `${projectIssues.length} issues`
+                    }
+                    return `${matching.length} of ${projectIssues.length} issues`
+                  })()}
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
                 {ISSUE_STATUSES.map((status) => {
                   const filtered = sortIssues(
-                    issues.filter(
-                      (issue) => issue.project === project.name && issue.status === status
-                    )
+                    issues
+                      .filter(
+                        (issue) =>
+                          issue.project === project.name && issue.status === status
+                      )
+                      .filter(matchesFilters)
                   )
                   return (
                     <BoardColumn
@@ -728,6 +882,8 @@ export function KanbanBoard() {
                       project={project.name}
                       issues={filtered}
                       onOpenIssue={openIssue}
+                      highlightMatches={isFiltering}
+                      emptyStateLabel={isFiltering ? "No matching issues" : "Drop issues here"}
                     />
                   )
                 })}

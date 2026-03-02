@@ -22,10 +22,12 @@ export function IssueCard({
   issue,
   onOpen,
   isOverlay = false,
+  isHighlighted = false,
 }: {
   issue: Issue
   onOpen?: (issue: Issue) => void
   isOverlay?: boolean
+  isHighlighted?: boolean
 }) {
   const {
     attributes,
@@ -53,6 +55,7 @@ export function IssueCard({
       className={cn(
         "group rounded-xl border border-border/70 bg-card p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border/90 hover:shadow-md",
         isDragging && "opacity-70 shadow-lg",
+        isHighlighted && "ring-2 ring-blue-500/50 ring-offset-1 ring-offset-background",
         onOpen && "cursor-pointer"
       )}
       onClick={() => onOpen?.(issue)}

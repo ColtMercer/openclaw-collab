@@ -12,12 +12,16 @@ export function BoardColumn({
   project,
   issues,
   onOpenIssue,
+  highlightMatches = false,
+  emptyStateLabel = "Drop issues here",
 }: {
   id: string
   title: IssueStatus
   project: string
   issues: Issue[]
   onOpenIssue?: (issue: Issue) => void
+  highlightMatches?: boolean
+  emptyStateLabel?: string
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id,
@@ -52,12 +56,17 @@ export function BoardColumn({
           strategy={verticalListSortingStrategy}
         >
           {issues.map((issue) => (
-            <IssueCard key={issue._id} issue={issue} onOpen={onOpenIssue} />
+            <IssueCard
+              key={issue._id}
+              issue={issue}
+              onOpen={onOpenIssue}
+              isHighlighted={highlightMatches}
+            />
           ))}
         </SortableContext>
         {issues.length === 0 && (
           <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/60 px-3 py-6 text-center text-xs text-muted-foreground">
-            Drop issues here
+            {emptyStateLabel}
           </div>
         )}
       </div>

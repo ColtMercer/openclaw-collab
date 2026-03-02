@@ -15,6 +15,7 @@ export type Issue = {
   project: string
   priority: IssuePriority
   status: IssueStatus
+  labels?: Array<{ name: string } | string>
   order: number
   createdAt: string
 }
