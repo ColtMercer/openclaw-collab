@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCategorySpending, getCategories } from "@/lib/finance-queries";
 import { formatCurrency } from "@/lib/utils";
 import { Card } from "@/components/finance/Card";
@@ -74,7 +75,12 @@ export default async function BudgetPage() {
               <div className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
                   <span>{overBudget ? "🔴" : noBudget ? "⚪" : "✅"}</span>
-                  <span className="font-medium">{item.category}</span>
+                  <Link
+                    href={`/finance/category/${encodeURIComponent(item.category)}`}
+                    className="font-medium hover:text-indigo-300 transition-colors"
+                  >
+                    {item.category}
+                  </Link>
                   <span className="text-zinc-500 text-xs">({item.group})</span>
                   <span className="opacity-0 group-hover:opacity-100 transition-opacity">
                     <CommentButton description={item.category} amount={formatCurrency(item.actual)} category={item.category} page="budget" />

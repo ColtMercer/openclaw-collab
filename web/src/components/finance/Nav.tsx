@@ -66,7 +66,18 @@ export function Nav() {
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
-  const currentPage = allLinks.find((l) => l.href === pathname);
+  const categoryMatch = pathname?.match(/^\/finance\/category\/(.+)$/);
+  let categoryLabel = "";
+  if (categoryMatch?.[1]) {
+    try {
+      categoryLabel = decodeURIComponent(categoryMatch[1]);
+    } catch {
+      categoryLabel = categoryMatch[1];
+    }
+  }
+  const currentPage = allLinks.find((l) => l.href === pathname) || (
+    categoryLabel ? { href: pathname, label: `Category: ${categoryLabel}`, icon: "🏷️" } : undefined
+  );
 
   return (
     <>
