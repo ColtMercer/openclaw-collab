@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   DndContext,
   DragOverlay,
@@ -52,6 +53,10 @@ const truncateTitle = (title: string, maxLength = 30) => {
 }
 
 export function KanbanBoard() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const hasHydratedFromUrl = React.useRef(false)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [issues, setIssues] = React.useState<Issue[]>([])
   const [activeIssue, setActiveIssue] = React.useState<Issue | null>(null)
@@ -143,10 +148,67 @@ export function KanbanBoard() {
 
   React.useEffect(() => {
     const handle = setTimeout(() => {
-      setDebouncedQuery(searchInput.trim().toLowerCase())
+      setDebouncedQuery(searchInput.trim())
     }, 200)
     return () => clearTimeout(handle)
   }, [searchInput])
+
+  const normalizedQuery = React.useMemo(
+    () => debouncedQuery.trim().toLowerCase(),
+    [debouncedQuery]
+  )
+
+  const parseLabelsParam = React.useCallback((value: string | null) => {
+    if (!value) return []
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+  }, [])
+
+  const updateUrlParams = React.useCallback(
+    (params: { q?: string | null; labels?: string[] | null }) => {
+      const nextParams = new URLSearchParams(searchParams.toString())
+
+      if (params.q !== undefined) {
+        const value = params.q?.trim() ?? ""
+        if (value) {
+          nextParams.set("q", value)
+        } else {
+          nextParams.delete("q")
+        }
+      }
+
+      if (params.labels !== undefined) {
+        const labels = params.labels?.filter(Boolean) ?? []
+        if (labels.length > 0) {
+          nextParams.set("labels", labels.join(","))
+        } else {
+          nextParams.delete("labels")
+        }
+      }
+
+      const query = nextParams.toString()
+      router.replace(query ? `${pathname}?${query}` : pathname)
+    },
+    [router, searchParams, pathname]
+  )
+
+  React.useEffect(() => {
+    const query = searchParams.get("q") ?? ""
+    const labels = parseLabelsParam(searchParams.get("labels"))
+
+    setSearchInput((prev) => (prev === query ? prev : query))
+    setDebouncedQuery(query.trim())
+    setActiveLabelFilters(labels)
+
+    hasHydratedFromUrl.current = true
+  }, [parseLabelsParam, searchParams])
+
+  React.useEffect(() => {
+    if (!hasHydratedFromUrl.current) return
+    updateUrlParams({ q: debouncedQuery.length > 0 ? debouncedQuery : null })
+  }, [debouncedQuery, updateUrlParams])
 
   const labelBuckets = React.useMemo(() => {
     const typeLabels = new Set<string>()
@@ -178,21 +240,27 @@ export function KanbanBoard() {
   const matchesFilters = React.useCallback(
     (issue: Issue) => {
       const matchesSearch =
-        debouncedQuery.length === 0 ||
-        issue.title.toLowerCase().includes(debouncedQuery)
+        normalizedQuery.length === 0 ||
+        issue.title.toLowerCase().includes(normalizedQuery)
       if (!matchesSearch) return false
 
       if (activeLabelFilters.length === 0) return true
       const labels = getLabelNames(issue)
       return activeLabelFilters.every((label) => labels.includes(label))
     },
-    [activeLabelFilters, debouncedQuery, getLabelNames]
+    [activeLabelFilters, getLabelNames, normalizedQuery]
   )
 
   const toggleLabel = (label: string) => {
-    setActiveLabelFilters((prev) =>
-      prev.includes(label) ? prev.filter((item) => item !== label) : [...prev, label]
-    )
+    setActiveLabelFilters((prev) => {
+      const next = prev.includes(label)
+        ? prev.filter((item) => item !== label)
+        : [...prev, label]
+      if (hasHydratedFromUrl.current) {
+        updateUrlParams({ labels: next })
+      }
+      return next
+    })
   }
 
   const toggleProject = (projectName: string) => {
@@ -206,6 +274,7 @@ export function KanbanBoard() {
     setDebouncedQuery("")
     setActiveLabelFilters([])
     setActiveProjectFilters([])
+    router.replace(pathname)
   }
 
   const hasActiveFilters =
