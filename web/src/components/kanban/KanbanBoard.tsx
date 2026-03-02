@@ -46,6 +46,11 @@ function sortIssues(issues: Issue[]) {
   return [...issues].sort((a, b) => a.order - b.order)
 }
 
+const truncateTitle = (title: string, maxLength = 30) => {
+  if (title.length <= maxLength) return title
+  return `${title.slice(0, Math.max(0, maxLength - 3))}...`
+}
+
 export function KanbanBoard() {
   const [projects, setProjects] = React.useState<Project[]>([])
   const [issues, setIssues] = React.useState<Issue[]>([])
@@ -74,6 +79,14 @@ export function KanbanBoard() {
   const [activeProjectFilters, setActiveProjectFilters] = React.useState<string[]>([])
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+  )
+
+  const pendingIssues = React.useMemo(
+    () =>
+      sortIssues(
+        issues.filter((issue) => issue.status === "Review" || issue.status === "Blocked")
+      ),
+    [issues]
   )
 
   const [newIssue, setNewIssue] = React.useState({
@@ -736,33 +749,42 @@ export function KanbanBoard() {
         </div>
       </div>
 
-      {/* Quick blockers summary */}
-      {(() => {
-        const blockedIssues = issues.filter((i) => i.status === "Blocked")
-        if (blockedIssues.length === 0) return null
-        return (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-950/20 p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="text-lg">🚫</span>
-              <h2 className="text-sm font-semibold uppercase tracking-wide text-amber-400">
-                Pending You ({blockedIssues.length})
-              </h2>
-            </div>
-            <div className="space-y-1.5">
-              {blockedIssues.map((issue) => (
+      {pendingIssues.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-200">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide">
+              ⏳ Pending Your Attention ({pendingIssues.length})
+            </h2>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {pendingIssues.map((issue) => {
+              const displayNumber =
+                typeof (issue as Issue & { number?: number }).number === "number"
+                  ? (issue as Issue & { number?: number }).number
+                  : issue.order + 1
+              const isBlocked = issue.status === "Blocked"
+              return (
                 <button
                   key={issue._id}
+                  type="button"
                   onClick={() => openIssue(issue)}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition hover:bg-amber-900/30"
+                  className={cn(
+                    "flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium transition hover:opacity-90",
+                    isBlocked
+                      ? "border-amber-600/60 bg-amber-600/20 text-amber-100"
+                      : "border-amber-400/50 bg-amber-400/15 text-amber-100"
+                  )}
                 >
-                  <span className="text-foreground">{issue.title}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{issue.project}</span>
+                  <span>{isBlocked ? "⛔" : "🕵️"}</span>
+                  <span className="whitespace-nowrap">
+                    #{displayNumber} · {truncateTitle(issue.title)} · {issue.project}
+                  </span>
                 </button>
-              ))}
-            </div>
+              )
+            })}
           </div>
-        )
-      })()}
+        </div>
+      )}
 
       {projects.length === 0 && (
         <div className="rounded-2xl border border-dashed border-border/60 bg-card/60 p-8 text-center">

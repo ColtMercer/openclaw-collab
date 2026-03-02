@@ -10,6 +10,7 @@ export type IssuePriority = "Low" | "Medium" | "High" | "Critical" | "Urgent"
 
 export type Issue = {
   _id: string
+  number?: number
   title: string
   description?: string
   project: string
