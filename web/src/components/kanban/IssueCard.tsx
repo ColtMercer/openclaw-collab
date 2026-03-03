@@ -18,6 +18,35 @@ const priorityStyles: Record<Issue["priority"], string> = {
 const displayPriority = (priority: Issue["priority"]) =>
   priority === "Urgent" ? "Critical" : priority
 
+const formatAge = (createdAt: string) => {
+  const created = new Date(createdAt).getTime()
+  if (Number.isNaN(created)) return ""
+  const diff = Math.max(0, Date.now() - created)
+  const hour = 1000 * 60 * 60
+  const day = hour * 24
+  const week = day * 7
+  const month = day * 30
+  const year = day * 365
+
+  if (diff < hour) return "<1h"
+  if (diff < day) return `${Math.floor(diff / hour)}h`
+  if (diff < week) return `${Math.floor(diff / day)}d`
+  if (diff < week * 4) return `${Math.floor(diff / week)}w`
+  if (diff < month * 12) return `${Math.floor(diff / month)}mo`
+  return `${Math.floor(diff / year)}y`
+}
+
+const ageColor = (createdAt: string) => {
+  const created = new Date(createdAt).getTime()
+  if (Number.isNaN(created)) return "text-emerald-400"
+  const diff = Math.max(0, Date.now() - created)
+  const day = 1000 * 60 * 60 * 24
+
+  if (diff < day * 7) return "text-emerald-400"
+  if (diff <= day * 30) return "text-amber-400"
+  return "text-rose-400"
+}
+
 export function IssueCard({
   issue,
   onOpen,
@@ -48,12 +77,14 @@ export function IssueCard({
     transition,
   }
 
+  const ageLabel = formatAge(issue.createdAt)
+
   return (
     <article
       ref={setNodeRef}
       style={style}
       className={cn(
-        "group rounded-xl border border-border/70 bg-card p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border/90 hover:shadow-md",
+        "group relative rounded-xl border border-border/70 bg-card p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border/90 hover:shadow-md",
         isDragging && "opacity-70 shadow-lg",
         isHighlighted && "ring-2 ring-blue-500/50 ring-offset-1 ring-offset-background",
         onOpen && "cursor-pointer"
@@ -94,6 +125,13 @@ export function IssueCard({
       <p className="mt-2 text-xs text-muted-foreground">
         Created {new Date(issue.createdAt).toLocaleDateString()}
       </p>
+      {ageLabel ? (
+        <span
+          className={cn("absolute bottom-2 right-2 text-[10px] font-mono", ageColor(issue.createdAt))}
+        >
+          {ageLabel}
+        </span>
+      ) : null}
     </article>
   )
 }

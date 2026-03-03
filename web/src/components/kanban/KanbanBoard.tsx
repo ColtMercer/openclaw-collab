@@ -57,6 +57,7 @@ export function KanbanBoard() {
   const searchParams = useSearchParams()
   const pathname = usePathname()
   const hasHydratedFromUrl = React.useRef(false)
+  const searchInputRef = React.useRef<HTMLInputElement>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [issues, setIssues] = React.useState<Issue[]>([])
   const [activeIssue, setActiveIssue] = React.useState<Issue | null>(null)
@@ -152,6 +153,32 @@ export function KanbanBoard() {
     }, 200)
     return () => clearTimeout(handle)
   }, [searchInput])
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement
+      const isFormField =
+        activeElement instanceof HTMLInputElement ||
+        activeElement instanceof HTMLTextAreaElement ||
+        activeElement instanceof HTMLSelectElement
+
+      if (event.key === "/" && !isFormField) {
+        event.preventDefault()
+        const input = searchInputRef.current
+        if (input) {
+          input.focus()
+          input.select()
+        }
+      }
+
+      if (event.key === "Escape" && activeElement === searchInputRef.current) {
+        searchInputRef.current?.blur()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [])
 
   const normalizedQuery = React.useMemo(
     () => debouncedQuery.trim().toLowerCase(),
@@ -872,6 +899,7 @@ export function KanbanBoard() {
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
             <div className="flex-1">
               <Input
+                ref={searchInputRef}
                 placeholder="Search issue titles..."
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
