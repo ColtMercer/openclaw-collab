@@ -83,6 +83,7 @@ export function KanbanBoard() {
   const [debouncedQuery, setDebouncedQuery] = React.useState("")
   const [activeLabelFilters, setActiveLabelFilters] = React.useState<string[]>([])
   const [activeProjectFilters, setActiveProjectFilters] = React.useState<string[]>([])
+  const [isSearchFocused, setIsSearchFocused] = React.useState(false)
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
@@ -160,7 +161,8 @@ export function KanbanBoard() {
       const isFormField =
         activeElement instanceof HTMLInputElement ||
         activeElement instanceof HTMLTextAreaElement ||
-        activeElement instanceof HTMLSelectElement
+        activeElement instanceof HTMLSelectElement ||
+        (activeElement instanceof HTMLElement && activeElement.isContentEditable)
 
       if (event.key === "/" && !isFormField) {
         event.preventDefault()
@@ -169,6 +171,11 @@ export function KanbanBoard() {
           input.focus()
           input.select()
         }
+      }
+
+      if (event.key === "c" && !isFormField && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault()
+        setIssueDialogOpen(true)
       }
 
       if (event.key === "Escape" && activeElement === searchInputRef.current) {
@@ -897,13 +904,21 @@ export function KanbanBoard() {
       <div className="rounded-2xl border border-border/60 bg-card/60 p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex-1">
+            <div className="relative flex-1">
               <Input
                 ref={searchInputRef}
                 placeholder="Search issue titles..."
+                className="pr-10"
                 value={searchInput}
                 onChange={(event) => setSearchInput(event.target.value)}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setIsSearchFocused(false)}
               />
+              {!isSearchFocused && searchInput.length === 0 && (
+                <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 rounded-md border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  /
+                </kbd>
+              )}
             </div>
             <div className="text-xs text-muted-foreground">
               {hasActiveFilters ? "Filters active" : "No filters applied"}
