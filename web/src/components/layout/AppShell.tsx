@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Menu } from "lucide-react"
 import { ChatPanel } from "@/components/chat/ChatPanel"
+import { SignInButton } from "@/components/auth/SignInButton"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -52,9 +53,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               )
             })}
             <ChatPanel />
+            <SignInButton />
           </nav>
           <div className="flex items-center gap-2 md:hidden">
             <ChatPanel />
+            <SignInButton />
             <Sheet>
               <SheetTrigger asChild>
                 <Button size="icon" variant="outline">
@@ -87,6 +90,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       </Link>
                     )
                   })}
+                </div>
+                <div className="pt-2">
+                  <SignInButton />
                 </div>
               </SheetContent>
             </Sheet>
