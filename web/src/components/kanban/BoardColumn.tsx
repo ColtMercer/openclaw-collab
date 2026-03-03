@@ -11,6 +11,7 @@ export function BoardColumn({
   title,
   project,
   issues,
+  countLabel,
   onOpenIssue,
   highlightMatches = false,
   emptyStateLabel = "Drop issues here",
@@ -19,6 +20,7 @@ export function BoardColumn({
   title: IssueStatus
   project: string
   issues: Issue[]
+  countLabel?: string
   onOpenIssue?: (issue: Issue) => void
   highlightMatches?: boolean
   emptyStateLabel?: string
@@ -42,7 +44,9 @@ export function BoardColumn({
         )}>
           {title === "Blocked" ? "🚫 Blocked" : title}
         </h3>
-        <span className="text-xs text-muted-foreground">{issues.length}</span>
+        <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+          {countLabel ?? issues.length}
+        </span>
       </div>
       <div
         ref={setNodeRef}

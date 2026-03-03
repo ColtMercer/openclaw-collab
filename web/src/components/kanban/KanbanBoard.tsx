@@ -1025,29 +1025,20 @@ export function KanbanBoard() {
                   <h2 className="text-lg font-semibold text-foreground">{project.name}</h2>
                   <p className="text-xs text-muted-foreground">{project.slug}</p>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {(() => {
-                    const projectIssues = issues.filter(
-                      (issue) => issue.project === project.name
-                    )
-                    const matching = projectIssues.filter(matchesFilters)
-                    if (!isFiltering) {
-                      return `${projectIssues.length} issues`
-                    }
-                    return `${matching.length} of ${projectIssues.length} issues`
-                  })()}
+                <span className="rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {issues.filter((issue) => issue.project === project.name).length} issues
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
                 {ISSUE_STATUSES.map((status) => {
-                  const filtered = sortIssues(
-                    issues
-                      .filter(
-                        (issue) =>
-                          issue.project === project.name && issue.status === status
-                      )
-                      .filter(matchesFilters)
+                  const columnIssues = issues.filter(
+                    (issue) =>
+                      issue.project === project.name && issue.status === status
                   )
+                  const filtered = sortIssues(columnIssues.filter(matchesFilters))
+                  const countLabel = isFiltering
+                    ? `${filtered.length} / ${columnIssues.length}`
+                    : `${columnIssues.length}`
                   return (
                     <BoardColumn
                       key={`${project._id}-${status}`}
@@ -1055,6 +1046,7 @@ export function KanbanBoard() {
                       title={status}
                       project={project.name}
                       issues={filtered}
+                      countLabel={countLabel}
                       onOpenIssue={openIssue}
                       highlightMatches={isFiltering}
                       emptyStateLabel={isFiltering ? "No matching issues" : "Drop issues here"}
