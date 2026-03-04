@@ -15,6 +15,7 @@ export function BoardColumn({
   onOpenIssue,
   selectedIds,
   onToggleSelect,
+  isDragDisabled = false,
   highlightMatches = false,
   emptyStateLabel = "Drop issues here",
 }: {
@@ -26,6 +27,7 @@ export function BoardColumn({
   onOpenIssue?: (issue: Issue) => void
   selectedIds?: Set<string>
   onToggleSelect?: (id: string) => void
+  isDragDisabled?: boolean
   highlightMatches?: boolean
   emptyStateLabel?: string
 }) {
@@ -70,6 +72,7 @@ export function BoardColumn({
               onOpen={onOpenIssue}
               isHighlighted={highlightMatches}
               selected={Boolean(selectedIds?.has(issue._id))}
+              isDragDisabled={isDragDisabled}
               onToggleSelect={onToggleSelect}
             />
           ))}

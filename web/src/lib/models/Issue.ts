@@ -7,6 +7,7 @@ export type IssueDocument = {
   priority: "Low" | "Medium" | "High" | "Critical" | "Urgent"
   status: "Backlog" | "In Progress" | "Review" | "Done"
   order: number
+  dueDate?: Date
   createdAt: Date
 }
 
@@ -26,6 +27,7 @@ const IssueSchema = new Schema<IssueDocument>(
       default: "Backlog",
     },
     order: { type: Number, default: 0 },
+    dueDate: { type: Date },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 )

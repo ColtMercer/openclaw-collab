@@ -45,6 +45,45 @@ export async function getRecentTransactions(limit = 20) {
   return db.collection("transactions").find({ amount: { $ne: null } }).sort({ date: -1 }).limit(limit).toArray();
 }
 
+// ─── Duplicate Charge Detector ────────────────────────────────────────────
+export async function getDuplicateCharges() {
+  const db = await getDb();
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+  const pipeline = [
+    {
+      $match: {
+        date: { $gte: ninetyDaysAgo },
+        amount: { $lt: 0 },
+        category: { $ne: "Transfer" },
+      },
+    },
+    { $addFields: { dayKey: { $dateToString: { format: "%Y-%m-%d", date: "$date" } } } },
+    {
+      $group: {
+        _id: { day: "$dayKey", description: "$description", amount: "$amount" },
+        count: { $sum: 1 },
+        totalCharged: { $sum: "$amount" },
+      },
+    },
+    { $match: { count: { $gte: 2 } } },
+    {
+      $project: {
+        _id: 0,
+        date: { $dateFromString: { dateString: "$_id.day" } },
+        description: "$_id.description",
+        amount: "$_id.amount",
+        count: 1,
+        totalCharged: 1,
+      },
+    },
+    { $sort: { date: -1 } },
+  ];
+
+  return db.collection("transactions").aggregate(pipeline).toArray();
+}
+
 export async function getTransactions(params: {
   search?: string; category?: string; account?: string;
   dateFrom?: string; dateTo?: string;
@@ -149,6 +188,91 @@ export async function getInsightsData() {
   return { dow, merchants, trends };
 }
 
+// ─── New Recurring Charge Alert ────────────────────────────────────────────
+export async function getNewRecurringCharges() {
+  const db = await getDb();
+
+  const recurringKeywords = [
+    "netflix", "spotify", "apple", "openai", "anthropic", "cursor", "alpacadb",
+    "replit", "godaddy", "cloudflare", "vercel", "railway", "grammarly",
+    "amazon", "adobe", "github", "google", "notion", "figma", "zoom",
+    "dropbox", "finnhub", "massive", "myheritage",
+  ];
+
+  const now = new Date();
+  const windowStart = new Date();
+  windowStart.setDate(windowStart.getDate() - 60);
+  windowStart.setHours(0, 0, 0, 0);
+
+  const orderedKeywords = [...recurringKeywords].sort((a, b) => b.length - a.length);
+  const keywordRegexes = orderedKeywords.map((k) => new RegExp(k, "i"));
+
+  const recentTransactions = await db.collection("transactions").find({
+    date: { $gte: windowStart },
+    amount: { $lt: 0 },
+    category: { $ne: "Transfer" },
+    description: { $in: keywordRegexes },
+  }).project({ description: 1, date: 1, amount: 1 }).toArray();
+
+  const byMerchant = new Map<string, { merchant: string; firstSeenDate: Date; amount: number }>();
+
+  for (const tx of recentTransactions) {
+    const description = (tx.description || "").toString();
+    if (!description) continue;
+
+    let matchedKey: string | null = null;
+    let matchedLabel: string | null = null;
+    for (const keyword of orderedKeywords) {
+      if (description.toLowerCase().includes(keyword)) {
+        matchedKey = keyword;
+        const match = description.match(new RegExp(keyword, "i"));
+        matchedLabel = match?.[0] || keyword;
+        break;
+      }
+    }
+    if (!matchedKey) continue;
+
+    const existing = byMerchant.get(matchedKey);
+    const date = tx.date ? new Date(tx.date) : null;
+    if (!date) continue;
+
+    if (!existing || date < existing.firstSeenDate) {
+      byMerchant.set(matchedKey, {
+        merchant: matchedLabel || matchedKey,
+        firstSeenDate: date,
+        amount: Math.abs(Number(tx.amount) || 0),
+      });
+    }
+  }
+
+  const merchants = Array.from(byMerchant.entries());
+  const priorChecks = await Promise.all(merchants.map(async ([key]) => {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return db.collection("transactions").findOne({
+      date: { $lt: windowStart },
+      amount: { $lt: 0 },
+      description: { $regex: new RegExp(escaped, "i") },
+    }, { projection: { _id: 1 } });
+  }));
+
+  const results = merchants
+    .filter((_, i) => !priorChecks[i])
+    .map(([_, data]) => {
+      const daysAgo = Math.floor((now.getTime() - data.firstSeenDate.getTime()) / 86400000);
+      const projectedAnnualCost = data.amount * 12;
+      return {
+        merchant: data.merchant,
+        firstSeenDate: data.firstSeenDate,
+        amount: data.amount,
+        daysAgo,
+        projectedAnnualCost,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+
+  return results;
+}
+
 // ─── Subscription Audit ────────────────────────────────────────────────────
 export async function getSubscriptionAudit() {
   const db = await getDb();
@@ -180,6 +304,118 @@ export async function getSubscriptionAudit() {
   ]).toArray();
 
   return { patterns, frequentMerchants };
+}
+
+// ─── Subscription Tier Escalation Alert ────────────────────────────────────
+export async function getSubscriptionEscalations() {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  start.setHours(0, 0, 0, 0);
+
+  const subscriptionKeywords = [
+    "netflix", "spotify", "apple", "google", "adobe", "github", "openai", "anthropic",
+    "chatgpt", "cursor", "onlyfans", "alpacadb", "replit", "perplexity", "youtube",
+    "dropbox", "notion", "figma", "canva", "zoom", "godaddy", "cloudflare", "vercel",
+    "railway", "grammarly", "duolingo", "hulu", "disney", "amazon", "myheritage",
+    "butcherbox", "massive", "finnhub",
+  ];
+  const keywordRegexes = subscriptionKeywords.map((k) => new RegExp(k, "i"));
+
+  const rows = await db.collection("transactions").aggregate([
+    {
+      $match: {
+        date: { $gte: start },
+        amount: { $lt: 0 },
+        category: { $ne: "Transfer" },
+        description: { $in: keywordRegexes },
+      },
+    },
+    { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+    {
+      $group: {
+        _id: { description: "$description", month: "$monthKey" },
+        total: { $sum: { $abs: "$amount" } },
+      },
+    },
+    { $sort: { "_id.month": 1 } },
+  ]).toArray();
+
+  const monthKeys = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  function normalizeMerchant(raw: string): string {
+    return raw
+      .toLowerCase()
+      .replace(/[^\w\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function displayMerchant(raw: string): string {
+    return raw.replace(/\s+/g, " ").trim();
+  }
+
+  type MonthlyRow = { _id: { description?: string; month: string }; total: number };
+  const merchantMap: Record<string, { merchant: string; monthlyTotals: Record<string, number> }> = {};
+
+  for (const row of rows as MonthlyRow[]) {
+    const rawDesc = row._id.description || "Unknown";
+    const normalized = normalizeMerchant(rawDesc);
+    if (!normalized) continue;
+    if (!merchantMap[normalized]) {
+      merchantMap[normalized] = { merchant: displayMerchant(rawDesc), monthlyTotals: {} };
+    }
+    merchantMap[normalized].monthlyTotals[row._id.month] =
+      (merchantMap[normalized].monthlyTotals[row._id.month] || 0) + row.total;
+  }
+
+  const results = Object.values(merchantMap)
+    .map((m) => {
+      const monthlyHistory = monthKeys.map((month) => ({
+        month,
+        amount: m.monthlyTotals[month] || 0,
+      }));
+
+      let biggestJump = 0;
+      let jumpFromMonth = "";
+      let jumpToMonth = "";
+
+      for (let i = 1; i < monthlyHistory.length; i += 1) {
+        const prev = monthlyHistory[i - 1].amount;
+        const cur = monthlyHistory[i].amount;
+        if (prev <= 0 || cur <= prev) continue;
+        const pct = ((cur - prev) / prev) * 100;
+        if (pct > biggestJump) {
+          biggestJump = pct;
+          jumpFromMonth = monthlyHistory[i - 1].month;
+          jumpToMonth = monthlyHistory[i].month;
+        }
+      }
+
+      let currentMonthlyAmount = 0;
+      for (let i = monthlyHistory.length - 1; i >= 0; i -= 1) {
+        if (monthlyHistory[i].amount > 0) {
+          currentMonthlyAmount = monthlyHistory[i].amount;
+          break;
+        }
+      }
+
+      return {
+        merchant: m.merchant,
+        monthlyHistory,
+        biggestJump,
+        jumpFromMonth,
+        jumpToMonth,
+        currentMonthlyAmount,
+      };
+    })
+    .filter((m) => m.biggestJump > 50)
+    .sort((a, b) => b.biggestJump - a.biggestJump);
+
+  return results;
 }
 
 // ─── AI Spend Tracker ──────────────────────────────────────────────────────

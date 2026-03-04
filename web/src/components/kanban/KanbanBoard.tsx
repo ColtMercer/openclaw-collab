@@ -12,6 +12,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core"
 import { arrayMove } from "@dnd-kit/sortable"
+import { format, isValid, parseISO } from "date-fns"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -52,6 +53,20 @@ const truncateTitle = (title: string, maxLength = 30) => {
   return `${title.slice(0, Math.max(0, maxLength - 3))}...`
 }
 
+const toDateInputValue = (value?: string | null) => {
+  if (!value) return ""
+  const parsed = parseISO(value)
+  if (!isValid(parsed)) return ""
+  return format(parsed, "yyyy-MM-dd")
+}
+
+const toIsoDate = (value: string) => {
+  if (!value) return null
+  const parsed = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString()
+}
+
 export function KanbanBoard() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -69,6 +84,7 @@ export function KanbanBoard() {
     project: "",
     priority: "Medium" as IssuePriority,
     status: "Backlog" as IssueStatus,
+    dueDate: "",
   })
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
@@ -87,16 +103,39 @@ export function KanbanBoard() {
   const [activeLabelFilters, setActiveLabelFilters] = React.useState<string[]>([])
   const [activeProjectFilters, setActiveProjectFilters] = React.useState<string[]>([])
   const [isSearchFocused, setIsSearchFocused] = React.useState(false)
+  const [sortMode, setSortMode] = React.useState<"order" | "dueDate">("order")
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
   )
 
+  const getDueSortValue = React.useCallback((issue: Issue) => {
+    if (!issue.dueDate) return Number.POSITIVE_INFINITY
+    const parsed = parseISO(issue.dueDate)
+    if (!isValid(parsed)) return Number.POSITIVE_INFINITY
+    return parsed.getTime()
+  }, [])
+
+  const sortIssuesForDisplay = React.useCallback(
+    (items: Issue[]) => {
+      if (sortMode === "dueDate") {
+        return [...items].sort((a, b) => {
+          const aDue = getDueSortValue(a)
+          const bDue = getDueSortValue(b)
+          if (aDue !== bDue) return aDue - bDue
+          return a.order - b.order
+        })
+      }
+      return sortIssues(items)
+    },
+    [getDueSortValue, sortMode]
+  )
+
   const pendingIssues = React.useMemo(
     () =>
-      sortIssues(
+      sortIssuesForDisplay(
         issues.filter((issue) => issue.status === "Review" || issue.status === "Blocked")
       ),
-    [issues]
+    [issues, sortIssuesForDisplay]
   )
 
   const [newIssue, setNewIssue] = React.useState({
@@ -104,6 +143,7 @@ export function KanbanBoard() {
     description: "",
     project: "",
     priority: "Medium" as IssuePriority,
+    dueDate: "",
   })
 
   const [newProject, setNewProject] = React.useState({ name: "", slug: "" })
@@ -391,6 +431,7 @@ export function KanbanBoard() {
     const order = currentIssues.length
 
     try {
+      const dueDate = toIsoDate(newIssue.dueDate)
       const response = await fetch("/api/issues", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -401,6 +442,7 @@ export function KanbanBoard() {
           priority: newIssue.priority,
           status: "Backlog",
           order,
+          ...(dueDate ? { dueDate } : {}),
         }),
       })
 
@@ -418,6 +460,7 @@ export function KanbanBoard() {
         description: "",
         project: newIssue.project,
         priority: "Medium",
+        dueDate: "",
       })
       setIssueDialogOpen(false)
       toast.success("Issue created.")
@@ -481,6 +524,7 @@ export function KanbanBoard() {
       project: normalized.project,
       priority: normalized.priority,
       status: normalized.status,
+      dueDate: toDateInputValue(normalized.dueDate),
     })
     setIssueDetailOpen(true)
   }
@@ -540,6 +584,7 @@ export function KanbanBoard() {
     }
 
     try {
+      const dueDate = toIsoDate(issueDraft.dueDate)
       const response = await fetch(`/api/issues/${selectedIssue._id}` , {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -550,6 +595,7 @@ export function KanbanBoard() {
           priority: issueDraft.priority,
           status: issueDraft.status,
           order,
+          dueDate: dueDate ?? null,
         }),
       })
 
@@ -909,6 +955,16 @@ export function KanbanBoard() {
                     ))}
                   </SelectContent>
                 </Select>
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Due date</span>
+                  <Input
+                    type="date"
+                    value={newIssue.dueDate}
+                    onChange={(event) =>
+                      setNewIssue((prev) => ({ ...prev, dueDate: event.target.value }))
+                    }
+                  />
+                </div>
                 <Button className="w-full" onClick={handleCreateIssue} disabled={isCreatingIssue}>
                   {isCreatingIssue ? "Creating..." : "Create issue"}
                 </Button>
@@ -990,9 +1046,23 @@ export function KanbanBoard() {
               {hasActiveFilters ? "Filters active" : "No filters applied"}
             </div>
           </div>
-          <Button variant="secondary" onClick={clearFilters} disabled={!hasActiveFilters}>
-            Clear All
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={sortMode}
+              onValueChange={(value: "order" | "dueDate") => setSortMode(value)}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="Sort issues" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="order">Manual order</SelectItem>
+                <SelectItem value="dueDate">Sort by due date</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="secondary" onClick={clearFilters} disabled={!hasActiveFilters}>
+              Clear All
+            </Button>
+          </div>
         </div>
         {projects.length > 1 && (
           <div className="mt-3 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
@@ -1101,7 +1171,7 @@ export function KanbanBoard() {
                     (issue) =>
                       issue.project === project.name && issue.status === status
                   )
-                  const filtered = sortIssues(columnIssues.filter(matchesFilters))
+                  const filtered = sortIssuesForDisplay(columnIssues.filter(matchesFilters))
                   const countLabel = isFiltering
                     ? `${filtered.length} / ${columnIssues.length}`
                     : `${columnIssues.length}`
@@ -1116,6 +1186,7 @@ export function KanbanBoard() {
                       onOpenIssue={openIssue}
                       selectedIds={selectedIds}
                       onToggleSelect={toggleSelect}
+                      isDragDisabled={sortMode === "dueDate"}
                       highlightMatches={isFiltering}
                       emptyStateLabel={isFiltering ? "No matching issues" : "Drop issues here"}
                     />
@@ -1252,6 +1323,16 @@ export function KanbanBoard() {
                     ))}
                   </SelectContent>
                 </Select>
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">Due date</span>
+                  <Input
+                    type="date"
+                    value={issueDraft.dueDate}
+                    onChange={(event) =>
+                      setIssueDraft((prev) => ({ ...prev, dueDate: event.target.value }))
+                    }
+                  />
+                </div>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <Button

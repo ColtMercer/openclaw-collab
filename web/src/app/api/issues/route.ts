@@ -67,6 +67,7 @@ export async function POST(request: Request) {
     priority: payload.priority,
     status: payload.status ?? "Backlog",
     order: payload.order ?? 0,
+    dueDate: payload.dueDate,
   })
 
   return NextResponse.json(issue, { status: 201 })

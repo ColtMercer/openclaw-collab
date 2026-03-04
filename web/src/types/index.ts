@@ -18,6 +18,7 @@ export type Issue = {
   status: IssueStatus
   labels?: Array<{ name: string } | string>
   order: number
+  dueDate?: string | null
   createdAt: string
 }
 

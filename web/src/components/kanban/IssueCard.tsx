@@ -3,6 +3,7 @@
 import { GripVertical } from "lucide-react"
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+import { differenceInCalendarDays, isValid, parseISO, startOfDay } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import type { Issue } from "@/types"
 import { cn } from "@/lib/utils"
@@ -47,12 +48,45 @@ const ageColor = (createdAt: string) => {
   return "text-rose-400"
 }
 
+const getDueInfo = (dueDate?: string | null) => {
+  if (!dueDate) return null
+  const parsed = parseISO(dueDate)
+  if (!isValid(parsed)) return null
+  const today = startOfDay(new Date())
+  const dueDay = startOfDay(parsed)
+  const diff = differenceInCalendarDays(dueDay, today)
+
+  if (diff === 0) {
+    return {
+      label: "Due today",
+      className: "bg-amber-500/20 text-amber-100 border-amber-500/40",
+      isOverdue: false,
+    }
+  }
+
+  if (diff < 0) {
+    const days = Math.abs(diff)
+    return {
+      label: `Overdue ${days}d`,
+      className: "bg-rose-500/20 text-rose-100 border-rose-500/40",
+      isOverdue: true,
+    }
+  }
+
+  return {
+    label: `Due in ${diff}d`,
+    className: "bg-sky-500/20 text-sky-100 border-sky-500/40",
+    isOverdue: false,
+  }
+}
+
 export function IssueCard({
   issue,
   onOpen,
   isOverlay = false,
   isHighlighted = false,
   selected = false,
+  isDragDisabled = false,
   onToggleSelect,
 }: {
   issue: Issue
@@ -60,6 +94,7 @@ export function IssueCard({
   isOverlay?: boolean
   isHighlighted?: boolean
   selected?: boolean
+  isDragDisabled?: boolean
   onToggleSelect?: (id: string) => void
 }) {
   const {
@@ -73,7 +108,7 @@ export function IssueCard({
   } = useSortable({
     id: issue._id,
     data: { type: "issue", issue },
-    disabled: isOverlay,
+    disabled: isOverlay || isDragDisabled,
   })
 
   const style = {
@@ -83,6 +118,7 @@ export function IssueCard({
 
   const ageLabel = formatAge(issue.createdAt)
   const showCheckbox = !isOverlay && typeof onToggleSelect === "function"
+  const dueInfo = getDueInfo(issue.dueDate)
 
   return (
     <article
@@ -90,6 +126,7 @@ export function IssueCard({
       style={style}
       className={cn(
         "group relative rounded-xl border border-border/70 bg-card p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border/90 hover:shadow-md",
+        dueInfo?.isOverdue && "border-l-4 border-l-rose-500/80",
         isDragging && "opacity-70 shadow-lg",
         isHighlighted && "ring-2 ring-blue-500/50 ring-offset-1 ring-offset-background",
         onOpen && "cursor-pointer"
@@ -127,6 +164,11 @@ export function IssueCard({
           >
             {displayPriority(issue.priority)}
           </Badge>
+          {dueInfo ? (
+            <Badge variant="outline" className={cn("shrink-0 text-[11px]", dueInfo.className)}>
+              {dueInfo.label}
+            </Badge>
+          ) : null}
           {showCheckbox && (
             <label
               className={cn(

@@ -18,6 +18,8 @@ const sections = [
       { href: "/finance/budget", label: "Budget", icon: "📋" },
       { href: "/finance/recurring", label: "Recurring", icon: "🔄" },
       { href: "/finance/subscriptions", label: "Subscriptions", icon: "📦" },
+      { href: "/finance/subscription-escalations", label: "Sub Escalations", icon: "🚨" },
+      { href: "/finance/new-recurring", label: "New Recurring", icon: "🚨" },
     ],
   },
   {
@@ -32,6 +34,7 @@ const sections = [
       { href: "/finance/convenience-stores", label: "Convenience Stores", icon: "🏪" },
       { href: "/finance/ai-spending", label: "AI Spend", icon: "🤖" },
       { href: "/finance/utilities", label: "Utilities", icon: "⚡" },
+      { href: "/finance/duplicate-charges", label: "Duplicate Charges", icon: "🧾" },
       { href: "/finance/auto-repairs", label: "Auto Repairs", icon: "🔧" },
     ],
   },
