@@ -13,6 +13,8 @@ export function BoardColumn({
   issues,
   countLabel,
   onOpenIssue,
+  selectedIds,
+  onToggleSelect,
   highlightMatches = false,
   emptyStateLabel = "Drop issues here",
 }: {
@@ -22,6 +24,8 @@ export function BoardColumn({
   issues: Issue[]
   countLabel?: string
   onOpenIssue?: (issue: Issue) => void
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
   highlightMatches?: boolean
   emptyStateLabel?: string
 }) {
@@ -65,6 +69,8 @@ export function BoardColumn({
               issue={issue}
               onOpen={onOpenIssue}
               isHighlighted={highlightMatches}
+              selected={Boolean(selectedIds?.has(issue._id))}
+              onToggleSelect={onToggleSelect}
             />
           ))}
         </SortableContext>

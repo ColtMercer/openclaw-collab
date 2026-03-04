@@ -52,11 +52,15 @@ export function IssueCard({
   onOpen,
   isOverlay = false,
   isHighlighted = false,
+  selected = false,
+  onToggleSelect,
 }: {
   issue: Issue
   onOpen?: (issue: Issue) => void
   isOverlay?: boolean
   isHighlighted?: boolean
+  selected?: boolean
+  onToggleSelect?: (id: string) => void
 }) {
   const {
     attributes,
@@ -78,6 +82,7 @@ export function IssueCard({
   }
 
   const ageLabel = formatAge(issue.createdAt)
+  const showCheckbox = !isOverlay && typeof onToggleSelect === "function"
 
   return (
     <article
@@ -112,15 +117,39 @@ export function IssueCard({
             </p>
           </div>
         </div>
-        <Badge
-          variant="outline"
-          className={cn(
-            "shrink-0 text-[11px] uppercase tracking-wide",
-            priorityStyles[issue.priority]
+        <div className="flex items-center gap-2">
+          <Badge
+            variant="outline"
+            className={cn(
+              "shrink-0 text-[11px] uppercase tracking-wide",
+              priorityStyles[issue.priority]
+            )}
+          >
+            {displayPriority(issue.priority)}
+          </Badge>
+          {showCheckbox && (
+            <label
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-md border border-border/60 bg-muted/40 text-muted-foreground transition",
+                selected
+                  ? "pointer-events-auto opacity-100"
+                  : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100"
+              )}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={selected}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => {
+                  event.stopPropagation()
+                  onToggleSelect?.(issue._id)
+                }}
+                className="h-3.5 w-3.5 accent-blue-500"
+              />
+            </label>
           )}
-        >
-          {displayPriority(issue.priority)}
-        </Badge>
+        </div>
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
         Created {new Date(issue.createdAt).toLocaleDateString()}

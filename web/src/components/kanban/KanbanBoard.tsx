@@ -61,6 +61,7 @@ export function KanbanBoard() {
   const [projects, setProjects] = React.useState<Project[]>([])
   const [issues, setIssues] = React.useState<Issue[]>([])
   const [activeIssue, setActiveIssue] = React.useState<Issue | null>(null)
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set())
   const [selectedIssue, setSelectedIssue] = React.useState<Issue | null>(null)
   const [issueDraft, setIssueDraft] = React.useState({
     title: "",
@@ -79,6 +80,8 @@ export function KanbanBoard() {
   const [isDeletingIssue, setIsDeletingIssue] = React.useState(false)
   const [isCreatingIssue, setIsCreatingIssue] = React.useState(false)
   const [isCreatingProject, setIsCreatingProject] = React.useState(false)
+  const [isBulkUpdating, setIsBulkUpdating] = React.useState(false)
+  const [bulkTargetStatus, setBulkTargetStatus] = React.useState<IssueStatus | null>(null)
   const [searchInput, setSearchInput] = React.useState("")
   const [debouncedQuery, setDebouncedQuery] = React.useState("")
   const [activeLabelFilters, setActiveLabelFilters] = React.useState<string[]>([])
@@ -104,6 +107,22 @@ export function KanbanBoard() {
   })
 
   const [newProject, setNewProject] = React.useState({ name: "", slug: "" })
+
+  const toggleSelect = React.useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
+  const clearSelection = React.useCallback(() => {
+    setSelectedIds(new Set())
+  }, [])
 
   const fetchData = React.useCallback(async () => {
     setLoading(true)
@@ -178,6 +197,10 @@ export function KanbanBoard() {
         setIssueDialogOpen(true)
       }
 
+      if (event.key === "Escape") {
+        clearSelection()
+      }
+
       if (event.key === "Escape" && activeElement === searchInputRef.current) {
         searchInputRef.current?.blur()
       }
@@ -185,7 +208,7 @@ export function KanbanBoard() {
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [])
+  }, [clearSelection])
 
   const normalizedQuery = React.useMemo(
     () => debouncedQuery.trim().toLowerCase(),
@@ -303,6 +326,15 @@ export function KanbanBoard() {
     )
   }
 
+  React.useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const validIds = new Set(issues.map((issue) => issue._id))
+      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [issues])
+
   const clearFilters = () => {
     setSearchInput("")
     setDebouncedQuery("")
@@ -315,6 +347,40 @@ export function KanbanBoard() {
     searchInput.trim().length > 0 ||
     activeLabelFilters.length > 0 ||
     activeProjectFilters.length > 0
+
+  const bulkStatuses: IssueStatus[] = ["Backlog", "In Progress", "Review", "Done"]
+  const selectedCount = selectedIds.size
+
+  const handleBulkMove = async (status: IssueStatus) => {
+    if (selectedIds.size === 0) return
+    setIsBulkUpdating(true)
+    setBulkTargetStatus(status)
+    const ids = Array.from(selectedIds)
+    try {
+      const responses = await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/issues/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          })
+        )
+      )
+
+      if (responses.some((response) => !response.ok)) {
+        throw new Error("Failed to move some issues")
+      }
+
+      await fetchData()
+      clearSelection()
+      toast.success(`Moved ${ids.length} issue${ids.length === 1 ? "" : "s"}.`)
+    } catch (err) {
+      toast.error("Could not move the selected issues.")
+    } finally {
+      setIsBulkUpdating(false)
+      setBulkTargetStatus(null)
+    }
+  }
 
   const handleCreateIssue = async () => {
     if (!newIssue.title || !newIssue.project) return
@@ -740,7 +806,7 @@ export function KanbanBoard() {
   }
 
   return (
-    <section className="space-y-10">
+    <section className={cn("space-y-10", selectedCount > 0 && "pb-24")}>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold text-foreground">Kanban Board</h1>
@@ -1048,6 +1114,8 @@ export function KanbanBoard() {
                       issues={filtered}
                       countLabel={countLabel}
                       onOpenIssue={openIssue}
+                      selectedIds={selectedIds}
+                      onToggleSelect={toggleSelect}
                       highlightMatches={isFiltering}
                       emptyStateLabel={isFiltering ? "No matching issues" : "Drop issues here"}
                     />
@@ -1065,6 +1133,39 @@ export function KanbanBoard() {
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {selectedCount > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-zinc-900/95 px-4 py-3 shadow-lg backdrop-blur">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-zinc-100">
+              {selectedCount} selected
+            </span>
+            <span className="text-sm text-zinc-300">Move to:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {bulkStatuses.map((status) => (
+                <Button
+                  key={status}
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => handleBulkMove(status)}
+                  disabled={isBulkUpdating}
+                >
+                  {isBulkUpdating && bulkTargetStatus === status ? "Moving..." : status}
+                </Button>
+              ))}
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={clearSelection}
+              disabled={isBulkUpdating}
+              className="text-zinc-200 hover:bg-zinc-800 hover:text-zinc-50"
+            >
+              ✕ Clear
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Dialog
         open={issueDetailOpen}
