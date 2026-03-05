@@ -2,16 +2,7 @@
 
 import * as React from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core"
-import { arrayMove } from "@dnd-kit/sortable"
+import { DragDropContext, type DropResult } from "@hello-pangea/dnd"
 import { format, isValid, parseISO } from "date-fns"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -35,7 +26,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { ISSUE_PRIORITIES, ISSUE_STATUSES } from "@/lib/constants"
 import type { Issue, IssuePriority, IssueStatus, Project } from "@/types"
 import { BoardColumn } from "@/components/kanban/BoardColumn"
-import { IssueCard } from "@/components/kanban/IssueCard"
 import { cn } from "@/lib/utils"
 
 const columnId = (project: string, status: IssueStatus) =>
@@ -75,7 +65,6 @@ export function KanbanBoard() {
   const searchInputRef = React.useRef<HTMLInputElement>(null)
   const [projects, setProjects] = React.useState<Project[]>([])
   const [issues, setIssues] = React.useState<Issue[]>([])
-  const [activeIssue, setActiveIssue] = React.useState<Issue | null>(null)
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set())
   const [selectedIssue, setSelectedIssue] = React.useState<Issue | null>(null)
   const [issueDraft, setIssueDraft] = React.useState({
@@ -104,9 +93,13 @@ export function KanbanBoard() {
   const [activeProjectFilters, setActiveProjectFilters] = React.useState<string[]>([])
   const [isSearchFocused, setIsSearchFocused] = React.useState(false)
   const [sortMode, setSortMode] = React.useState<"order" | "dueDate">("order")
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
-  )
+
+  const parseColumnId = React.useCallback((value: string) => {
+    if (!value.startsWith("column:")) return null
+    const [, project, status] = value.split(":")
+    if (!project || !status) return null
+    return { project, status: status as IssueStatus }
+  }, [])
 
   const getDueSortValue = React.useCallback((issue: Issue) => {
     if (!issue.dueDate) return Number.POSITIVE_INFINITY
@@ -502,12 +495,20 @@ export function KanbanBoard() {
   ) => {
     if (updates.length === 0) return
     try {
-      const response = await fetch("/api/issues/reorder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ updates }),
-      })
-      if (!response.ok) {
+      const responses = await Promise.all(
+        updates.map((update) =>
+          fetch(`/api/issues/${update.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: update.status,
+              order: update.order,
+              project: update.project,
+            }),
+          })
+        )
+      )
+      if (responses.some((response) => !response.ok)) {
         throw new Error("Failed to reorder issues")
       }
     } catch (err) {
@@ -687,60 +688,49 @@ export function KanbanBoard() {
     }
   }
 
-  const onDragStart = (event: DragStartEvent) => {
-    const issue = issues.find((item) => item._id === event.active.id)
-    setActiveIssue(issue ?? null)
-  }
+  const onDragEnd = (result: DropResult) => {
+    const { destination, source, draggableId } = result
 
-  const onDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
-    setActiveIssue(null)
-
-    if (!over) return
-
-    const activeIssue = issues.find((item) => item._id === active.id)
-    if (!activeIssue) return
-
-    const overIssue = issues.find((item) => item._id === over.id)
-    let destinationProject = activeIssue.project
-    let destinationStatus = activeIssue.status
-    let destinationIndex = 0
-
-    if (overIssue) {
-      destinationProject = overIssue.project
-      destinationStatus = overIssue.status
-    } else if (typeof over.id === "string" && over.id.startsWith("column:")) {
-      const [, projectName, statusName] = over.id.split(":")
-      destinationProject = projectName
-      destinationStatus = statusName as IssueStatus
+    if (!destination) return
+    if (
+      destination.droppableId === source.droppableId &&
+      destination.index === source.index
+    ) {
+      return
     }
 
-    const sourceKey = `${activeIssue.project}:${activeIssue.status}`
-    const destinationKey = `${destinationProject}:${destinationStatus}`
+    const sourceMeta = parseColumnId(source.droppableId)
+    const destinationMeta = parseColumnId(destination.droppableId)
+    if (!sourceMeta || !destinationMeta) return
 
     const sourceIssues = sortIssues(
       issues.filter(
-        (issue) => issue.project === activeIssue.project && issue.status === activeIssue.status
+        (issue) => issue.project === sourceMeta.project && issue.status === sourceMeta.status
       )
     )
-    const destinationIssues = sortIssues(
-      issues.filter(
-        (issue) => issue.project === destinationProject && issue.status === destinationStatus
-      )
-    )
+    const destinationIssues =
+      sourceMeta.project === destinationMeta.project &&
+      sourceMeta.status === destinationMeta.status
+        ? sourceIssues
+        : sortIssues(
+            issues.filter(
+              (issue) =>
+                issue.project === destinationMeta.project &&
+                issue.status === destinationMeta.status
+            )
+          )
 
-    const sourceIndex = sourceIssues.findIndex((issue) => issue._id === activeIssue._id)
-    if (sourceIndex === -1) return
+    const movingIssue = sourceIssues[source.index]
+    if (!movingIssue) return
 
-    if (overIssue) {
-      destinationIndex = destinationIssues.findIndex((issue) => issue._id === overIssue._id)
-    } else {
-      destinationIndex = destinationIssues.length
-    }
+    if (
+      sourceMeta.project === destinationMeta.project &&
+      sourceMeta.status === destinationMeta.status
+    ) {
+      const reordered = [...sourceIssues]
+      const [removed] = reordered.splice(source.index, 1)
+      reordered.splice(destination.index, 0, removed)
 
-    if (sourceKey === destinationKey) {
-      if (sourceIndex === destinationIndex) return
-      const reordered = arrayMove(sourceIssues, sourceIndex, destinationIndex)
       const updates = reordered.map((issue, index) => ({
         id: issue._id,
         project: issue.project,
@@ -760,12 +750,12 @@ export function KanbanBoard() {
     }
 
     const nextSource = [...sourceIssues]
-    nextSource.splice(sourceIndex, 1)
+    nextSource.splice(source.index, 1)
     const nextDestination = [...destinationIssues]
-    nextDestination.splice(destinationIndex, 0, {
-      ...activeIssue,
-      project: destinationProject,
-      status: destinationStatus,
+    nextDestination.splice(destination.index, 0, {
+      ...movingIssue,
+      project: destinationMeta.project,
+      status: destinationMeta.status,
     })
 
     const sourceUpdates = nextSource.map((issue, index) => ({
@@ -774,19 +764,18 @@ export function KanbanBoard() {
       status: issue.status,
       order: index,
     }))
-
     const destinationUpdates = nextDestination.map((issue, index) => ({
       id: issue._id,
-      project: destinationProject,
-      status: destinationStatus,
+      project: destinationMeta.project,
+      status: destinationMeta.status,
       order: index,
     }))
 
+    const allUpdates = [...sourceUpdates, ...destinationUpdates]
+
     setIssues((prev) =>
       prev.map((issue) => {
-        const updated = [...sourceUpdates, ...destinationUpdates].find(
-          (item) => item.id === issue._id
-        )
+        const updated = allUpdates.find((item) => item.id === issue._id)
         if (!updated) return issue
         return {
           ...issue,
@@ -797,7 +786,7 @@ export function KanbanBoard() {
       })
     )
 
-    void persistReorder([...sourceUpdates, ...destinationUpdates])
+    void persistReorder(allUpdates)
   }
 
   if (loading) {
@@ -1148,7 +1137,7 @@ export function KanbanBoard() {
         </div>
       </div>
 
-      <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      <DragDropContext onDragEnd={onDragEnd}>
         <div className="space-y-10">
           {projects
             .filter((project) =>
@@ -1180,15 +1169,14 @@ export function KanbanBoard() {
                       key={`${project._id}-${status}`}
                       id={columnId(project.name, status)}
                       title={status}
-                      project={project.name}
                       issues={filtered}
                       countLabel={countLabel}
                       onOpenIssue={openIssue}
                       selectedIds={selectedIds}
                       onToggleSelect={toggleSelect}
-                      isDragDisabled={sortMode === "dueDate"}
+                      isDragDisabled={sortMode === "dueDate" || isFiltering}
                       highlightMatches={isFiltering}
-                      emptyStateLabel={isFiltering ? "No matching issues" : "Drop issues here"}
+                      emptyStateLabel={isFiltering ? "No matching issues" : "No issues yet"}
                     />
                   )
                 })}
@@ -1196,14 +1184,7 @@ export function KanbanBoard() {
             </div>
           ))}
         </div>
-        <DragOverlay>
-          {activeIssue ? (
-            <div className="w-72">
-              <IssueCard issue={activeIssue} isOverlay />
-            </div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
+      </DragDropContext>
 
       {selectedCount > 0 && (
         <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-zinc-900/95 px-4 py-3 shadow-lg backdrop-blur">

@@ -1,8 +1,7 @@
 "use client"
 
 import { GripVertical } from "lucide-react"
-import { useSortable } from "@dnd-kit/sortable"
-import { CSS } from "@dnd-kit/utilities"
+import type { DraggableProvidedDragHandleProps } from "@hello-pangea/dnd"
 import { differenceInCalendarDays, isValid, parseISO, startOfDay } from "date-fns"
 import { Badge } from "@/components/ui/badge"
 import type { Issue } from "@/types"
@@ -83,70 +82,51 @@ const getDueInfo = (dueDate?: string | null) => {
 export function IssueCard({
   issue,
   onOpen,
-  isOverlay = false,
   isHighlighted = false,
   selected = false,
   isDragDisabled = false,
   onToggleSelect,
+  dragHandleProps,
+  isDragging = false,
 }: {
   issue: Issue
   onOpen?: (issue: Issue) => void
-  isOverlay?: boolean
   isHighlighted?: boolean
   selected?: boolean
   isDragDisabled?: boolean
   onToggleSelect?: (id: string) => void
+  dragHandleProps?: DraggableProvidedDragHandleProps | null
+  isDragging?: boolean
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({
-    id: issue._id,
-    data: { type: "issue", issue },
-    disabled: isOverlay || isDragDisabled,
-  })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  }
-
   const ageLabel = formatAge(issue.createdAt)
-  const showCheckbox = !isOverlay && typeof onToggleSelect === "function"
+  const showCheckbox = typeof onToggleSelect === "function"
   const dueInfo = getDueInfo(issue.dueDate)
 
   return (
     <article
-      ref={setNodeRef}
-      style={style}
       className={cn(
-        "group relative rounded-xl border border-border/70 bg-card p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border/90 hover:shadow-md",
+        "group relative rounded-xl border border-border/70 bg-card p-3 shadow-sm transition-shadow duration-150 hover:-translate-y-0.5 hover:border-border/90 hover:shadow-md",
         dueInfo?.isOverdue && "border-l-4 border-l-rose-500/80",
         isDragging && "opacity-70 shadow-lg",
         isHighlighted && "ring-2 ring-blue-500/50 ring-offset-1 ring-offset-background",
         onOpen && "cursor-pointer"
       )}
       onClick={() => onOpen?.(issue)}
-      {...attributes}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-2">
-          {!isOverlay && (
-            <button
-              ref={setActivatorNodeRef}
-              type="button"
-              className="mt-0.5 rounded-md border border-border/60 bg-muted/30 p-1 text-muted-foreground transition hover:text-foreground"
-              onClick={(event) => event.stopPropagation()}
-              {...listeners}
-            >
-              <GripVertical className="size-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={isDragDisabled}
+            className={cn(
+              "mt-0.5 rounded-md border border-border/60 bg-muted/30 p-1 text-muted-foreground transition hover:text-foreground",
+              isDragDisabled && "cursor-not-allowed opacity-50"
+            )}
+            onClick={(event) => event.stopPropagation()}
+            {...dragHandleProps}
+          >
+            <GripVertical className="size-4" />
+          </button>
           <div>
             <h4 className="text-sm font-semibold text-foreground">{issue.title}</h4>
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
