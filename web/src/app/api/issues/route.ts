@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { connectToDatabase } from "@/lib/db"
 import { Issue } from "@/lib/models/Issue"
+import { Activity } from "@/lib/models/Activity"
 import { Project } from "@/lib/models/Project"
 
 // Normalize status strings to title-case canonical values
@@ -59,15 +60,28 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   await connectToDatabase()
   const payload = await request.json()
+  const actor = payload.actor ?? "System"
+  const status = payload.status ? normalizeStatus(payload.status) : "Backlog"
 
   const issue = await Issue.create({
     title: payload.title,
     description: payload.description,
     project: payload.project,
     priority: payload.priority,
-    status: payload.status ?? "Backlog",
+    status,
     order: payload.order ?? 0,
     dueDate: payload.dueDate,
+  })
+
+  await Activity.create({
+    action: "created",
+    issueId: issue._id,
+    issueTitle: issue.title,
+    project: issue.project,
+    fromStatus: null,
+    toStatus: issue.status,
+    timestamp: new Date(),
+    actor,
   })
 
   return NextResponse.json(issue, { status: 201 })

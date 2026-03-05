@@ -1,173 +1,194 @@
-import Link from "next/link";
+import Link from "next/link"
+import { CheckCircle2, CircleDotDashed, PlusCircle } from "lucide-react"
 
-import ActivityToggle, { ActivityItem } from "@/app/activity/ActivityToggle";
-import { githubConfig } from "@/lib/config";
-import { fetchGitHub } from "@/lib/github";
+import { connectToDatabase } from "@/lib/db"
+import { Activity } from "@/lib/models/Activity"
 
-type GitHubIssue = {
-  id: number;
-  number: number;
-  title: string;
-  html_url: string;
-  closed_at: string | null;
-  updated_at: string;
-  pull_request?: unknown;
-  user: {
-    login: string;
-  } | null;
-};
-
-type GitHubPullRequest = {
-  id: number;
-  number: number;
-  title: string;
-  html_url: string;
-  merged_at: string | null;
-  updated_at: string;
-  user: {
-    login: string;
-  } | null;
-};
+type ActivityEntry = {
+  _id: string
+  action: "created" | "status_changed"
+  issueId: string
+  issueTitle: string
+  project: string
+  fromStatus?: string | null
+  toStatus?: string | null
+  timestamp: Date
+  actor: string
+}
 
 const dayFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
+  month: "long",
   day: "numeric",
-});
-const weekFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
+})
 
-function toDateKey(isoDate: string) {
-  return isoDate.slice(0, 10);
+function toDateKey(date: Date) {
+  return date.toISOString().slice(0, 10)
 }
 
-function formatDayLabel(dateKey: string) {
-  return dayFormatter.format(new Date(`${dateKey}T00:00:00Z`));
+function startOfWeek(date: Date) {
+  const start = new Date(date)
+  const day = start.getDay()
+  const diff = (day + 6) % 7
+  start.setDate(start.getDate() - diff)
+  start.setHours(0, 0, 0, 0)
+  return start
 }
 
-function startOfWeek(dateKey: string) {
-  const date = new Date(`${dateKey}T00:00:00Z`);
-  const day = date.getUTCDay();
-  const diff = (day + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - diff);
-  return toDateKey(date.toISOString());
+function formatDayLabel(dateKey: string, todayKey: string, yesterdayKey: string) {
+  if (dateKey === todayKey) return "Today"
+  if (dateKey === yesterdayKey) return "Yesterday"
+  return dayFormatter.format(new Date(`${dateKey}T00:00:00`))
 }
 
-function formatWeekLabel(dateKey: string) {
-  return `Week of ${weekFormatter.format(new Date(`${dateKey}T00:00:00Z`))}`;
-}
-
-function getWeekAgoCutoff() {
-  return Date.now() - 7 * 24 * 60 * 60 * 1000;
-}
-
-function groupItems(items: ActivityItem[], labelForKey: (key: string) => string) {
-  const map = new Map<string, ActivityItem[]>();
-  for (const item of items) {
-    const existing = map.get(item.dateKey) ?? [];
-    existing.push(item);
-    map.set(item.dateKey, existing);
+function groupByDate(entries: ActivityEntry[]) {
+  const groups = new Map<string, ActivityEntry[]>()
+  for (const entry of entries) {
+    const key = toDateKey(new Date(entry.timestamp))
+    const existing = groups.get(key) ?? []
+    existing.push(entry)
+    groups.set(key, existing)
   }
 
-  return Array.from(map.entries())
+  return Array.from(groups.entries())
     .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-    .map(([key, groupedItems]) => ({
+    .map(([key, items]) => ({
       key,
-      label: labelForKey(key),
-      items: groupedItems,
-    }));
+      items: items.sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      ),
+    }))
 }
 
-function buildGroups(items: ActivityItem[]) {
-  const daily = groupItems(items, formatDayLabel);
-  const weeklyItems = items.map((item) => ({
-    ...item,
-    dateKey: startOfWeek(item.dateKey),
-  }));
-  const weekly = groupItems(weeklyItems, formatWeekLabel);
+function buildSummary(entries: ActivityEntry[]) {
+  const weekStart = startOfWeek(new Date())
+  let created = 0
+  let completed = 0
 
-  return { daily, weekly };
+  for (const entry of entries) {
+    const timestamp = new Date(entry.timestamp)
+    if (timestamp < weekStart) continue
+    if (entry.action === "created") created += 1
+    if (entry.action === "status_changed" && entry.toStatus === "Done") completed += 1
+  }
+
+  return { created, completed }
+}
+
+function buildEntryText(entry: ActivityEntry) {
+  if (entry.action === "created") {
+    return `Issue ${entry.issueTitle} created in ${entry.project}`
+  }
+  if (entry.toStatus) {
+    return `Issue ${entry.issueTitle} moved to ${entry.toStatus} in ${entry.project}`
+  }
+  return `Issue ${entry.issueTitle} updated in ${entry.project}`
+}
+
+function getIcon(entry: ActivityEntry) {
+  if (entry.action === "created") {
+    return <PlusCircle className="size-5 text-emerald-400" />
+  }
+  if (entry.toStatus === "Done") {
+    return <CheckCircle2 className="size-5 text-emerald-400" />
+  }
+  return <CircleDotDashed className="size-5 text-sky-400" />
 }
 
 export default async function ActivityPage() {
-  const hasConfig = githubConfig.owner && githubConfig.repo;
-  let errorMessage = "";
-  let issueItems: ActivityItem[] = [];
-  let prItems: ActivityItem[] = [];
+  await connectToDatabase()
+  const entries = (await Activity.find({})
+    .sort({ timestamp: -1 })
+    .limit(200)
+    .lean()) as unknown as ActivityEntry[]
 
-  if (!hasConfig) {
-    errorMessage = "Set GITHUB_OWNER and GITHUB_REPO to load activity.";
-  } else {
-    try {
-      const [issues, pulls] = await Promise.all([
-        fetchGitHub<GitHubIssue[]>(
-          `/repos/${githubConfig.owner}/${githubConfig.repo}/issues?state=closed&sort=updated&direction=desc&per_page=100`
-        ),
-        fetchGitHub<GitHubPullRequest[]>(
-          `/repos/${githubConfig.owner}/${githubConfig.repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100`
-        ),
-      ]);
-
-      const cutoff = getWeekAgoCutoff();
-
-      issueItems = issues
-        .filter((issue) => !issue.pull_request)
-        .filter((issue) => issue.closed_at && new Date(issue.closed_at).getTime() >= cutoff)
-        .map((issue) => ({
-          id: issue.id,
-          number: issue.number,
-          title: issue.title,
-          url: issue.html_url,
-          user: issue.user?.login ?? "unknown",
-          dateKey: toDateKey(issue.closed_at as string),
-        }));
-
-      prItems = pulls
-        .filter((pull) => pull.merged_at && new Date(pull.merged_at).getTime() >= cutoff)
-        .map((pull) => ({
-          id: pull.id,
-          number: pull.number,
-          title: pull.title,
-          url: pull.html_url,
-          user: pull.user?.login ?? "unknown",
-          dateKey: toDateKey(pull.merged_at as string),
-        }));
-    } catch (error) {
-      errorMessage = error instanceof Error ? error.message : "Failed to load activity.";
-    }
-  }
-
-  const issueGroups = buildGroups(issueItems);
-  const prGroups = buildGroups(prItems);
+  const grouped = groupByDate(entries)
+  const todayKey = toDateKey(new Date())
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayKey = toDateKey(yesterday)
+  const summary = buildSummary(entries)
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-900 dark:bg-black dark:text-zinc-100">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
-        <nav className="flex items-center justify-between text-sm text-zinc-500 dark:text-zinc-400">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-zinc-700 transition hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
-          >
-            {"<-"} Dashboard
-          </Link>
-          <span className="text-xs uppercase tracking-[0.2em] text-zinc-400 dark:text-zinc-600">
-            Activity
-          </span>
-        </nav>
+    <div className="flex flex-col gap-10">
+      <nav className="flex items-center justify-between text-sm text-muted-foreground">
+        <Link href="/" className="inline-flex items-center gap-2 transition hover:text-foreground">
+          {"<-"} Dashboard
+        </Link>
+        <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground/70">
+          Activity
+        </span>
+      </nav>
 
-        {errorMessage ? (
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 text-sm text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
-            {errorMessage}
+      <section className="rounded-2xl border border-border/60 bg-black/40 p-6 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+              Activity feed
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              Daily rollups of issue creation and status changes across projects.
+            </p>
+          </div>
+          <div className="flex gap-6 text-sm">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                This week
+              </span>
+              <span className="text-2xl font-semibold text-foreground">
+                {summary.completed}
+              </span>
+              <span className="text-xs text-muted-foreground">Issues completed</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                This week
+              </span>
+              <span className="text-2xl font-semibold text-foreground">{summary.created}</span>
+              <span className="text-xs text-muted-foreground">Issues created</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-6">
+        {grouped.length === 0 ? (
+          <div className="rounded-2xl border border-border/60 bg-black/40 p-6 text-sm text-muted-foreground">
+            No activity yet. Create or move issues on the Kanban board to populate this feed.
           </div>
         ) : (
-          <ActivityToggle
-            daily={{ issues: issueGroups.daily, prs: prGroups.daily }}
-            weekly={{ issues: issueGroups.weekly, prs: prGroups.weekly }}
-          />
+          grouped.map((group) => (
+            <div key={group.key} className="space-y-3">
+              <h2 className="text-sm font-semibold text-muted-foreground">
+                {formatDayLabel(group.key, todayKey, yesterdayKey)}
+              </h2>
+              <div className="space-y-3">
+                {group.items.map((entry) => (
+                  <div
+                    key={entry._id}
+                    className="flex items-start justify-between gap-6 rounded-2xl border border-border/50 bg-black/40 p-4 shadow-sm"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="mt-1">{getIcon(entry)}</div>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          {buildEntryText(entry)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(entry.timestamp).toLocaleTimeString("en-US", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">by {entry.actor}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))
         )}
-      </div>
+      </section>
     </div>
-  );
+  )
 }

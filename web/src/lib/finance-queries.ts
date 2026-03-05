@@ -45,6 +45,205 @@ export async function getRecentTransactions(limit = 20) {
   return db.collection("transactions").find({ amount: { $ne: null } }).sort({ date: -1 }).limit(limit).toArray();
 }
 
+// ─── Spending Anomaly Detector ─────────────────────────────────────────────
+export async function getSpendingAnomalies() {
+  const db = await getDb();
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+  const monthKeys = Array.from({ length: 4 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (3 - i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const currentMonthKey = monthKeys[monthKeys.length - 1];
+
+  const [categoryAverages, recentTransactions, categoryMonthly, priorMerchants, currentMonthTransactions, merchantMonthly] =
+    await Promise.all([
+      db.collection("transactions").aggregate([
+        {
+          $match: {
+            date: { $gte: sixMonthsAgo },
+            amount: { $lt: 0 },
+            category: { $nin: ["Transfer", null, ""] },
+          },
+        },
+        { $group: { _id: "$category", avgAmount: { $avg: { $abs: "$amount" } }, count: { $sum: 1 } } },
+        { $match: { avgAmount: { $gt: 0 } } },
+      ]).toArray(),
+      db.collection("transactions").find({
+        date: { $gte: ninetyDaysAgo },
+        amount: { $lt: 0 },
+        category: { $nin: ["Transfer", null, ""] },
+      }).project({ date: 1, description: 1, amount: 1, category: 1 }).sort({ date: -1 }).toArray(),
+      db.collection("transactions").aggregate([
+        {
+          $match: {
+            date: { $gte: threeMonthsAgo },
+            amount: { $lt: 0 },
+            category: { $nin: ["Transfer", null, ""] },
+          },
+        },
+        { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+        { $group: { _id: { category: "$category", month: "$monthKey" }, total: { $sum: { $abs: "$amount" } } } },
+      ]).toArray(),
+      db.collection("transactions").distinct("description", {
+        date: { $lt: startOfMonth },
+        amount: { $lt: 0 },
+        description: { $ne: null },
+      }),
+      db.collection("transactions").find({
+        date: { $gte: startOfMonth },
+        amount: { $lt: -20 },
+        category: { $ne: "Transfer" },
+        description: { $ne: null },
+      }).project({ date: 1, description: 1, amount: 1, category: 1 }).sort({ date: -1 }).toArray(),
+      db.collection("transactions").aggregate([
+        {
+          $match: {
+            date: { $gte: threeMonthsAgo },
+            amount: { $lt: 0 },
+            category: { $ne: "Transfer" },
+            description: { $ne: null },
+          },
+        },
+        { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+        {
+          $group: {
+            _id: { description: "$description", month: "$monthKey" },
+            count: { $sum: 1 },
+            total: { $sum: { $abs: "$amount" } },
+            lastSeen: { $max: "$date" },
+            category: { $last: "$category" },
+          },
+        },
+      ]).toArray(),
+    ]);
+
+  const avgMap = new Map<string, { avg: number; count: number }>();
+  for (const row of categoryAverages as { _id: string; avgAmount: number; count: number }[]) {
+    if (!row?._id) continue;
+    avgMap.set(row._id, { avg: row.avgAmount, count: row.count });
+  }
+
+  const largeTransactions = (recentTransactions as { date: Date; description?: string; amount: number; category?: string }[])
+    .map((tx) => {
+      const category = tx.category || "Uncategorized";
+      const avg = avgMap.get(category)?.avg || 0;
+      const amount = Math.abs(Number(tx.amount) || 0);
+      const multiple = avg > 0 ? amount / avg : 0;
+      return {
+        date: tx.date,
+        description: tx.description || "Unknown",
+        category,
+        amount,
+        categoryAvg: avg,
+        multiple,
+      };
+    })
+    .filter((tx) => tx.categoryAvg > 0 && tx.multiple >= 2)
+    .sort((a, b) => b.multiple - a.multiple)
+    .slice(0, 30);
+
+  type CategoryRow = { _id: { category: string; month: string }; total: number };
+  const categoryMap: Record<string, Record<string, number>> = {};
+  for (const row of categoryMonthly as CategoryRow[]) {
+    if (!row._id?.category) continue;
+    if (!categoryMap[row._id.category]) categoryMap[row._id.category] = {};
+    categoryMap[row._id.category][row._id.month] = row.total;
+  }
+
+  const categorySpikes = Object.entries(categoryMap).map(([category, months]) => {
+    const currentTotal = months[currentMonthKey] || 0;
+    const prevTotals = monthKeys.slice(0, 3).map((m) => months[m] || 0);
+    const avgPrior3 = prevTotals.reduce((sum, v) => sum + v, 0) / 3;
+    const ratio = avgPrior3 > 0 ? currentTotal / avgPrior3 : 0;
+    return {
+      category,
+      currentTotal,
+      avgPrior3,
+      ratio,
+    };
+  }).filter((c) => c.avgPrior3 > 0 && c.currentTotal > c.avgPrior3 * 1.5)
+    .sort((a, b) => b.ratio - a.ratio);
+
+  const priorMerchantSet = new Set(priorMerchants as string[]);
+  const newMerchantMap = new Map<string, {
+    merchant: string;
+    firstSeen: Date;
+    category: string;
+    total: number;
+    count: number;
+    largestAmount: number;
+  }>();
+  for (const tx of currentMonthTransactions as { date: Date; description?: string; amount: number; category?: string }[]) {
+    const merchant = (tx.description || "").trim();
+    if (!merchant || priorMerchantSet.has(merchant)) continue;
+    const amount = Math.abs(Number(tx.amount) || 0);
+    const existing = newMerchantMap.get(merchant);
+    if (!existing) {
+      newMerchantMap.set(merchant, {
+        merchant,
+        firstSeen: tx.date,
+        category: tx.category || "Uncategorized",
+        total: amount,
+        count: 1,
+        largestAmount: amount,
+      });
+    } else {
+      existing.total += amount;
+      existing.count += 1;
+      if (tx.date < existing.firstSeen) existing.firstSeen = tx.date;
+      if (amount > existing.largestAmount) existing.largestAmount = amount;
+    }
+  }
+  const newMerchants = Array.from(newMerchantMap.values())
+    .sort((a, b) => b.largestAmount - a.largestAmount)
+    .slice(0, 30);
+
+  type MerchantRow = { _id: { description: string; month: string }; count: number; total: number; lastSeen?: Date; category?: string };
+  const merchantMap: Record<string, { counts: Record<string, number>; total: number; lastSeen?: Date; category?: string }> = {};
+  for (const row of merchantMonthly as MerchantRow[]) {
+    const desc = row._id?.description || "Unknown";
+    if (!merchantMap[desc]) {
+      merchantMap[desc] = { counts: {}, total: 0, lastSeen: row.lastSeen, category: row.category };
+    }
+    merchantMap[desc].counts[row._id.month] = row.count;
+    merchantMap[desc].total += row.total;
+    if (row.lastSeen && (!merchantMap[desc].lastSeen || row.lastSeen > merchantMap[desc].lastSeen!)) {
+      merchantMap[desc].lastSeen = row.lastSeen;
+    }
+  }
+
+  const frequencySpikes = Object.entries(merchantMap).map(([merchant, data]) => {
+    const currentCount = data.counts[currentMonthKey] || 0;
+    const prevCounts = monthKeys.slice(0, 3).map((m) => data.counts[m] || 0);
+    const avgPrior3 = prevCounts.reduce((sum, v) => sum + v, 0) / 3;
+    const ratio = avgPrior3 > 0 ? currentCount / avgPrior3 : 0;
+    return {
+      merchant,
+      currentCount,
+      avgPrior3,
+      ratio,
+      lastSeen: data.lastSeen,
+      category: data.category || "Uncategorized",
+    };
+  }).filter((m) => m.avgPrior3 > 0 && m.currentCount >= 3 && m.ratio >= 1.5)
+    .sort((a, b) => b.ratio - a.ratio)
+    .slice(0, 30);
+
+  return {
+    largeTransactions,
+    categorySpikes,
+    newMerchants,
+    frequencySpikes,
+    currentMonthKey,
+  };
+}
+
 // ─── Duplicate Charge Detector ────────────────────────────────────────────
 export async function getDuplicateCharges() {
   const db = await getDb();

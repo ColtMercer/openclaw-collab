@@ -13,6 +13,7 @@ import { Toaster } from "sonner"
 
 const navItems = [
   { href: "/", label: "Kanban" },
+  { href: "/activity", label: "Activity" },
   { href: "/articles", label: "Articles" },
   { href: "/finance", label: "Finance" },
   { href: "/shopper", label: "Shopper" },
