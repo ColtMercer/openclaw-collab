@@ -10,6 +10,7 @@ const sections = [
       { href: "/finance", label: "Dashboard", icon: "📊" },
       { href: "/finance/transactions", label: "Transactions", icon: "💳" },
       { href: "/finance/cashflow", label: "Cash Flow", icon: "📈" },
+      { href: "/finance/income", label: "Income", icon: "💵" },
     ],
   },
   {
