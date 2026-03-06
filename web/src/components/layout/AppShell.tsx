@@ -7,7 +7,7 @@ import { ChatPanel } from "@/components/chat/ChatPanel"
 import { SignInButton } from "@/components/auth/SignInButton"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { Toaster } from "sonner"
 
@@ -67,12 +67,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Button>
               </SheetTrigger>
               <SheetContent side="right" className="space-y-6">
-                <div>
+                <SheetHeader>
+                  <SheetTitle className="text-lg font-semibold">Navigation</SheetTitle>
                   <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">
                     OpenClaw Collab
                   </p>
-                  <h2 className="text-lg font-semibold">Navigation</h2>
-                </div>
+                </SheetHeader>
+                <div>
                 <div className="flex flex-col gap-3">
                   {navItems.map((item) => {
                     const isActive =
