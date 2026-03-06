@@ -16,6 +16,7 @@ const sections = [
     label: "Budgeting",
     links: [
       { href: "/finance/budget", label: "Budget", icon: "📋" },
+      { href: "/finance/budget-history", label: "Budget History", icon: "📅" },
       { href: "/finance/recurring", label: "Recurring", icon: "🔄" },
       { href: "/finance/subscriptions", label: "Subscriptions", icon: "📦" },
       { href: "/finance/subscription-escalations", label: "Sub Escalations", icon: "🚨" },

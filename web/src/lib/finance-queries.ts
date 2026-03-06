@@ -1234,6 +1234,10 @@ export async function getBudgetHistory(months = 6) {
   return { rows, monthSlots };
 }
 
+export async function getMonthlyBudgetHistory(months = 6) {
+  return getBudgetHistory(months);
+}
+
 // ─── Peer Payments (Zelle / Venmo / Apple Cash / Cash App) ────────────────
 export async function getPeerPaymentData(months = 12) {
   const db = await getDb();
