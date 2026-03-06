@@ -1,5 +1,17 @@
 import { getDb } from "./finance-db";
 
+const AI_SPEND_KEYWORDS = [
+  "openai", "anthropic", "claude", "chatgpt", "midjourney", "github copilot",
+  "cursor", "perplexity", "cohere", "replicate", "together ai", "groq",
+  "elevenlabs", "runway", "pika labs", "suno", "stability ai", "heygen",
+  "jasper", "copy.ai", "writesonic", "hugging face", "alpacadb", "alpaca",
+  "replit", "codeium", "tabnine",
+] as const;
+
+function getAISpendRegexes() {
+  return AI_SPEND_KEYWORDS.map((vendor) => new RegExp(vendor, "i"));
+}
+
 type SubscriptionAuditGroupName =
   | "gym"
   | "streaming"
@@ -968,16 +980,7 @@ export async function getSubscriptionEscalations() {
 // ─── AI Spend Tracker ──────────────────────────────────────────────────────
 export async function getAISpendData() {
   const db = await getDb();
-
-  const aiKeywords = [
-    "openai", "anthropic", "claude", "chatgpt", "midjourney", "github copilot",
-    "cursor", "perplexity", "cohere", "replicate", "together ai", "groq",
-    "elevenlabs", "runway", "pika labs", "suno", "stability ai", "heygen",
-    "jasper", "copy.ai", "writesonic", "hugging face", "alpacadb", "alpaca",
-    "replit", "codeium", "tabnine",
-  ];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const aiRegex: any[] = aiKeywords.map((v) => new RegExp(v, "i"));
+  const aiRegex = getAISpendRegexes();
 
   const [byVendor, monthlyTotals] = await Promise.all([
     db.collection("transactions").aggregate([
@@ -1459,16 +1462,7 @@ export async function getConvenienceStoreData(months = 6) {
 // ─── AI Vendor Monthly Breakdown (for MoM delta + Kill List) ──────────────
 export async function getAIVendorMonthlyBreakdown() {
   const db = await getDb();
-
-  const aiKeywords = [
-    "openai", "anthropic", "claude", "chatgpt", "midjourney", "github copilot",
-    "cursor", "perplexity", "cohere", "replicate", "together ai", "groq",
-    "elevenlabs", "runway", "pika labs", "suno", "stability ai", "heygen",
-    "jasper", "copy.ai", "writesonic", "hugging face", "alpacadb", "alpaca",
-    "replit", "codeium", "tabnine",
-  ];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const aiRegex: any[] = aiKeywords.map((v) => new RegExp(v, "i"));
+  const aiRegex = getAISpendRegexes();
 
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
@@ -1488,6 +1482,61 @@ export async function getAIVendorMonthlyBreakdown() {
     },
     { $sort: { "_id.month": 1 } },
   ]).toArray();
+}
+
+export async function getAICategoryComparison() {
+  const db = await getDb();
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const aiRegex = getAISpendRegexes();
+
+  const [categoryTotals, aiTotals] = await Promise.all([
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: startOfMonth },
+          amount: { $lt: 0 },
+          category: { $nin: ["Transfer", null, ""] },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: { $abs: "$amount" } },
+        },
+      },
+      { $sort: { total: -1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: startOfMonth },
+          amount: { $lt: 0 },
+          description: { $in: aiRegex },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $abs: "$amount" } },
+        },
+      },
+    ]).toArray(),
+  ]);
+
+  const aiTotal = (aiTotals[0] as { total?: number } | undefined)?.total || 0;
+  const rows = (categoryTotals as Array<{ _id: string; total: number }>)
+    .map((row) => ({ category: row._id, total: row.total }))
+    .filter((row) => row.category);
+
+  const aiIndex = rows.findIndex((row) => row.category === "AI Tools");
+  if (aiIndex >= 0) {
+    rows[aiIndex] = { category: "AI Tools", total: aiTotal };
+  } else {
+    rows.push({ category: "AI Tools", total: aiTotal });
+  }
+
+  return rows.sort((a, b) => b.total - a.total).slice(0, 8);
 }
 
 // ─── Utility Bill Anomaly Data ─────────────────────────────────────────────

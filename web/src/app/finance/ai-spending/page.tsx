@@ -1,4 +1,4 @@
-import { getAISpendData, getAIVendorMonthlyBreakdown } from "@/lib/finance-queries";
+import { getAICategoryComparison, getAISpendData, getAIVendorMonthlyBreakdown } from "@/lib/finance-queries";
 import { formatCurrency } from "@/lib/utils";
 import { Card } from "@/components/finance/Card";
 
@@ -22,6 +22,11 @@ type VendorSummary = {
 
 type MonthlyTotal = {
   _id: string;
+  total: number;
+};
+
+type CategoryComparison = {
+  category: string;
   total: number;
 };
 
@@ -69,9 +74,10 @@ const VENDOR_EMOJIS: Record<string, string> = {
 };
 
 export default async function AISpendingPage() {
-  const [{ byVendor, monthlyTotals }, vendorMonthly] = await Promise.all([
+  const [{ byVendor, monthlyTotals }, vendorMonthly, categoryComparison] = await Promise.all([
     getAISpendData(),
     getAIVendorMonthlyBreakdown(),
+    getAICategoryComparison(),
   ]);
 
   const now = new Date();
@@ -105,6 +111,10 @@ export default async function AISpendingPage() {
   const lastMonthTotal = monthlyTotalsTyped.find((m) => m._id === lastMonthKey)?.total || 0;
   const allTimeTotal = byVendorTyped.reduce((s, v) => s + v.total, 0);
   const activeVendors = byVendorTyped.filter((v) => daysSince(v.lastSeen) <= 45).length;
+  const budgetThreshold = 700;
+  const budgetDelta = currentMonthTotal - budgetThreshold;
+  const categoryComparisonTyped = categoryComparison as CategoryComparison[];
+  const aiCategoryRank = categoryComparisonTyped.findIndex((row) => row.category === "AI Tools") + 1;
 
   const maxMonthly = Math.max(...monthlyTotalsTyped.map((m) => m.total), 1);
 
@@ -127,6 +137,30 @@ export default async function AISpendingPage() {
         <Card title="Last Month" value={formatCurrency(lastMonthTotal)} subtitle="Prior month total" />
         <Card title="All-Time Total" value={formatCurrency(allTimeTotal)} subtitle="All AI vendors combined" />
         <Card title="Active Vendors" value={`${activeVendors}`} subtitle="Seen in last 45 days" />
+      </div>
+
+      <div
+        className={`rounded-xl border p-4 ${
+          currentMonthTotal > budgetThreshold
+            ? "border-orange-500/40 bg-orange-500/10"
+            : "border-emerald-500/30 bg-emerald-500/10"
+        }`}
+      >
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className={`text-sm font-semibold ${currentMonthTotal > budgetThreshold ? "text-orange-300" : "text-emerald-300"}`}>
+              {currentMonthTotal > budgetThreshold ? "⚠️ AI budget alert" : "✅ Under budget"}
+            </p>
+            <p className="text-sm text-zinc-300">
+              {currentMonthTotal > budgetThreshold
+                ? `You are ${formatCurrency(budgetDelta)} over your ${formatCurrency(budgetThreshold)}/mo AI budget this month.`
+                : `You are ${formatCurrency(Math.abs(budgetDelta))} under your ${formatCurrency(budgetThreshold)}/mo AI budget this month.`}
+            </p>
+          </div>
+          <div className={`text-sm font-mono ${currentMonthTotal > budgetThreshold ? "text-orange-200" : "text-emerald-200"}`}>
+            {formatCurrency(currentMonthTotal)} / {formatCurrency(budgetThreshold)}
+          </div>
+        </div>
       </div>
 
       {/* ROI callout */}
@@ -317,6 +351,39 @@ export default async function AISpendingPage() {
           </div>
         );
       })()}
+
+      <div className="bg-[#141420] border border-[#27272a] rounded-xl p-5">
+        <h2 className="text-lg font-semibold mb-1">📊 AI vs Other Categories</h2>
+        <p className="text-zinc-400 text-sm mb-4">
+          {aiCategoryRank > 0
+            ? `AI Tools is your #${aiCategoryRank} biggest expense category this month at ${formatCurrency(currentMonthTotal)}.`
+            : `AI Tools spend this month is ${formatCurrency(currentMonthTotal)}.`}
+        </p>
+
+        <div className="space-y-2">
+          {categoryComparisonTyped.map((row, index) => {
+            const isAI = row.category === "AI Tools";
+            return (
+              <div
+                key={row.category}
+                className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                  isAI ? "border-indigo-500/40 bg-indigo-500/10" : "border-zinc-800 bg-zinc-900/50"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`w-7 text-sm font-mono ${isAI ? "text-indigo-300" : "text-zinc-500"}`}>#{index + 1}</span>
+                  <span className={`text-sm font-medium ${isAI ? "text-indigo-200" : "text-zinc-200"}`}>
+                    {row.category}
+                  </span>
+                </div>
+                <span className={`text-sm font-mono font-semibold ${isAI ? "text-indigo-200" : "text-zinc-300"}`}>
+                  {formatCurrency(row.total)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
