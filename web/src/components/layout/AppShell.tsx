@@ -73,7 +73,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     OpenClaw Collab
                   </p>
                 </SheetHeader>
-                <div>
                 <div className="flex flex-col gap-3">
                   {navItems.map((item) => {
                     const isActive =
