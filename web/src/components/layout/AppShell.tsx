@@ -17,6 +17,7 @@ const navItems = [
   { href: "/articles", label: "Articles" },
   { href: "/finance", label: "Finance" },
   { href: "/shopper", label: "Shopper" },
+  { href: "/social", label: "Social" },
   { href: "/mission-control", label: "Mission Control" },
 ]
 

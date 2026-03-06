@@ -59,6 +59,35 @@ export type ChatMessage = {
   createdAt: string
 }
 
+export type SocialPlatform = "tiktok" | "twitter"
+export type SocialStatus = "draft" | "pending_review" | "approved" | "posted"
+
+export type SocialEngagement = {
+  views: number
+  likes: number
+  comments: number
+  shares: number
+  updated_at?: string | null
+}
+
+export type SocialPost = {
+  _id: string
+  title: string
+  platform: SocialPlatform
+  script: string
+  hook: string
+  hashtags: string[]
+  status: SocialStatus
+  video_path?: string | null
+  posted_at?: string | null
+  publish_id?: string | null
+  engagement: SocialEngagement
+  notes: string
+  created_at: string
+  topic: string
+  performance_notes?: string | null
+}
+
 export type SkillItem = {
   name: string
   description: string

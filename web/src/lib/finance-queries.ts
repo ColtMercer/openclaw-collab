@@ -40,6 +40,78 @@ export async function getCategorySpending(year?: number, month?: number) {
   return db.collection("transactions").aggregate(pipeline).toArray();
 }
 
+export async function getCategoryDetail(name: string, days?: number) {
+  const db = await getDb();
+  const now = new Date();
+  const startOfWindow = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+  const monthKeys = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  const monthlyRows = await db.collection("transactions").aggregate([
+    {
+      $match: {
+        category: name,
+        amount: { $lt: 0 },
+        date: { $gte: startOfWindow },
+      },
+    },
+    { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+    { $group: { _id: "$monthKey", total: { $sum: { $abs: "$amount" } } } },
+    { $sort: { _id: 1 } },
+  ]).toArray();
+
+  const monthlyMap: Record<string, number> = {};
+  for (const row of monthlyRows as { _id: string; total: number }[]) {
+    if (!row._id) continue;
+    monthlyMap[row._id] = row.total;
+  }
+  const monthlyTotals = monthKeys.map((month) => ({
+    month,
+    total: monthlyMap[month] || 0,
+  }));
+  const avgMonthly = monthlyTotals.reduce((s, m) => s + m.total, 0) / monthlyTotals.length;
+
+  const lifetimeRow = await db.collection("transactions").aggregate([
+    { $match: { category: name, amount: { $lt: 0 } } },
+    { $group: { _id: null, total: { $sum: { $abs: "$amount" } } } },
+  ]).toArray();
+  const lifetimeTotal = (lifetimeRow[0] as { total?: number } | undefined)?.total || 0;
+
+  const topMerchants = await db.collection("transactions").aggregate([
+    { $match: { category: name, amount: { $lt: 0 }, description: { $ne: null } } },
+    { $group: { _id: "$description", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+    { $sort: { total: -1 } },
+    { $limit: 10 },
+  ]).toArray();
+
+  const txFilter: Record<string, unknown> = {
+    category: name,
+    amount: { $lt: 0 },
+  };
+  if (typeof days === "number" && Number.isFinite(days)) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    since.setHours(0, 0, 0, 0);
+    txFilter.date = { $gte: since };
+  }
+
+  const transactions = await db.collection("transactions")
+    .find(txFilter)
+    .project({ transaction_id: 1, date: 1, description: 1, amount: 1 })
+    .sort({ date: -1 })
+    .toArray();
+
+  return {
+    transactions,
+    monthlyTotals,
+    topMerchants,
+    avgMonthly,
+    lifetimeTotal,
+  };
+}
+
 export async function getRecentTransactions(limit = 20) {
   const db = await getDb();
   return db.collection("transactions").find({ amount: { $ne: null } }).sort({ date: -1 }).limit(limit).toArray();
