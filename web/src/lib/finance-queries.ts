@@ -1,5 +1,91 @@
 import { getDb } from "./finance-db";
 
+type SubscriptionAuditGroupName =
+  | "gym"
+  | "streaming"
+  | "ai_tools"
+  | "cloud"
+  | "adult"
+  | "food_delivery"
+  | "clothing"
+  | "other";
+
+export type SubscriptionAuditSubscription = {
+  merchant: string;
+  monthlyAmount: number;
+  amountVariance: number;
+  hasPriceCreep: boolean;
+};
+
+export type SubscriptionAuditGroup = {
+  groupName: SubscriptionAuditGroupName;
+  count: number;
+  totalMonthly: number;
+  isRedundant: boolean;
+  subscriptions: SubscriptionAuditSubscription[];
+};
+
+export type SubscriptionAuditReport = {
+  groups: SubscriptionAuditGroup[];
+  healthScore: number;
+  totalMonthlySpend: number;
+  redundantGroupCount: number;
+  priceCreepCount: number;
+};
+
+const SUBSCRIPTION_AUDIT_KEYWORDS: Array<{
+  groupName: Exclude<SubscriptionAuditGroupName, "other">;
+  keywords: string[];
+}> = [
+  {
+    groupName: "gym",
+    keywords: ["planet fitness", "la fitness", "anytime fitness", "ymca", "crunch", "equinox"],
+  },
+  {
+    groupName: "streaming",
+    keywords: ["netflix", "hulu", "disney", "spotify", "youtube", "paramount", "peacock", "apple tv", "max", "hbo", "prime video", "tidal", "deezer"],
+  },
+  {
+    groupName: "ai_tools",
+    keywords: ["openai", "anthropic", "chatgpt", "claude", "cursor", "replit", "perplexity", "alpacadb", "elevenlabs", "google one ai"],
+  },
+  {
+    groupName: "cloud",
+    keywords: ["vercel", "railway", "digitalocean", "heroku", "linode", "cloudflare", "godaddy", "github"],
+  },
+  {
+    groupName: "adult",
+    keywords: ["onlyfans", "fanvue"],
+  },
+  {
+    groupName: "food_delivery",
+    keywords: ["butcherbox", "hello fresh", "factor", "gobble", "hungryroot"],
+  },
+  {
+    groupName: "clothing",
+    keywords: ["fabletics", "stitch fix", "trunk club", "bombas"],
+  },
+];
+
+function toMonthlyEquivalent(amount: number, frequency?: string | null): number {
+  const normalized = (frequency || "monthly").toLowerCase();
+  const absolute = Math.abs(amount);
+  if (normalized.includes("annual") || normalized.includes("yearly")) return absolute / 12;
+  if (normalized.includes("quarter")) return absolute / 3;
+  if (normalized.includes("week")) return absolute * 4.33;
+  return absolute;
+}
+
+function getSubscriptionAuditGroupName(description: string): SubscriptionAuditGroupName {
+  const normalized = description.toLowerCase();
+  for (const rule of SUBSCRIPTION_AUDIT_KEYWORDS) {
+    if (rule.keywords.some((keyword) => normalized.includes(keyword))) {
+      return rule.groupName;
+    }
+  }
+  return "other";
+}
+
 export async function getAccountBalances() {
   const db = await getDb();
   return db.collection("accounts").find({ last_balance: { $ne: null } }).sort({ last_balance: -1 }).toArray();
@@ -473,6 +559,129 @@ export async function getRecurringPatterns() {
   return db.collection("recurring_patterns").find({}).sort({ average_amount: 1 }).toArray();
 }
 
+export async function getSubscriptionAuditReport(): Promise<SubscriptionAuditReport> {
+  const db = await getDb();
+  const now = new Date();
+  const twelveMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+
+  type PatternDoc = {
+    description?: string | null;
+    sample_description?: string | null;
+    average_amount: number;
+    frequency?: string | null;
+    last_seen?: Date | string | null;
+  };
+
+  type MonthlyActualRow = {
+    _id: { merchant: string; month: string };
+    total: number;
+  };
+
+  const patterns = await db.collection("recurring_patterns")
+    .find({
+      average_amount: { $lt: 0 },
+      last_seen: { $gte: twelveMonthsAgo },
+    })
+    .sort({ average_amount: 1 })
+    .toArray() as unknown as PatternDoc[];
+
+  const merchantNames = patterns
+    .map((pattern) => (pattern.sample_description || pattern.description || "").trim())
+    .filter((merchant) => merchant.length > 0);
+
+  const monthlyActuals = merchantNames.length > 0
+    ? await db.collection("transactions").aggregate([
+        {
+          $match: {
+            date: { $gte: twelveMonthsAgo },
+            amount: { $lt: 0 },
+            description: { $in: merchantNames },
+          },
+        },
+        { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+        {
+          $group: {
+            _id: { merchant: "$description", month: "$monthKey" },
+            total: { $sum: { $abs: "$amount" } },
+          },
+        },
+      ]).toArray() as MonthlyActualRow[]
+    : [];
+
+  const monthlyTotalsByMerchant = new Map<string, number[]>();
+  for (const row of monthlyActuals) {
+    const merchant = row._id?.merchant;
+    if (!merchant) continue;
+    const current = monthlyTotalsByMerchant.get(merchant) || [];
+    current.push(row.total || 0);
+    monthlyTotalsByMerchant.set(merchant, current);
+  }
+
+  const groupsMap = new Map<SubscriptionAuditGroupName, SubscriptionAuditGroup>();
+  let redundantGroupCount = 0;
+  let priceCreepCount = 0;
+  let variancePenaltyCount = 0;
+
+  for (const pattern of patterns) {
+    const merchant = (pattern.sample_description || pattern.description || "Unknown").trim() || "Unknown";
+    const monthlyAmount = toMonthlyEquivalent(pattern.average_amount, pattern.frequency);
+    const monthlySeries = [...(monthlyTotalsByMerchant.get(merchant) || [])].sort((a, b) => a - b);
+    const amountVariance = monthlySeries.length > 0
+      ? Math.max(...monthlySeries) - Math.min(...monthlySeries)
+      : 0;
+
+    const firstThree = monthlySeries.slice(0, 3);
+    const lastThree = monthlySeries.slice(-3);
+    const firstThreeAvg = firstThree.length > 0 ? firstThree.reduce((sum, value) => sum + value, 0) / firstThree.length : monthlyAmount;
+    const lastThreeAvg = lastThree.length > 0 ? lastThree.reduce((sum, value) => sum + value, 0) / lastThree.length : monthlyAmount;
+    const hasPriceCreep = firstThreeAvg > 0 && lastThreeAvg > firstThreeAvg * 1.05;
+
+    if (hasPriceCreep) priceCreepCount += 1;
+    if (monthlyAmount > 0 && amountVariance > monthlyAmount * 0.1) variancePenaltyCount += 1;
+
+    const groupName = getSubscriptionAuditGroupName(merchant);
+    const existing = groupsMap.get(groupName) || {
+      groupName,
+      count: 0,
+      totalMonthly: 0,
+      isRedundant: false,
+      subscriptions: [],
+    };
+
+    existing.count += 1;
+    existing.totalMonthly += monthlyAmount;
+    existing.subscriptions.push({
+      merchant,
+      monthlyAmount,
+      amountVariance,
+      hasPriceCreep,
+    });
+    groupsMap.set(groupName, existing);
+  }
+
+  const groups = Array.from(groupsMap.values()).map((group) => {
+    const isRedundant = group.count >= 2;
+    if (isRedundant) redundantGroupCount += 1;
+    return {
+      ...group,
+      isRedundant,
+      totalMonthly: Number(group.totalMonthly.toFixed(2)),
+      subscriptions: group.subscriptions.sort((a, b) => b.monthlyAmount - a.monthlyAmount),
+    };
+  });
+
+  const totalMonthlySpend = groups.reduce((sum, group) => sum + group.totalMonthly, 0);
+  const healthScore = Math.max(0, 100 - (redundantGroupCount * 5) - (priceCreepCount * 2) - variancePenaltyCount);
+
+  return {
+    groups,
+    healthScore,
+    totalMonthlySpend: Number(totalMonthlySpend.toFixed(2)),
+    redundantGroupCount,
+    priceCreepCount,
+  };
+}
+
 export async function getCategories() {
   const db = await getDb();
   return db.collection("categories").find({}).sort({ category: 1 }).toArray();
@@ -796,6 +1005,105 @@ export async function getAISpendData() {
   return { byVendor, monthlyTotals };
 }
 
+// ─── Trading Infrastructure Cost Center ───────────────────────────────────
+export async function getTradingInfraCostCenter() {
+  const db = await getDb();
+  const vendorMatchers = [
+    { name: "AlpacaDB", regex: /ALPACADB/i },
+    { name: "Alpaca", regex: /ALPACA/i },
+    { name: "Finnhub", regex: /FINNHUB/i },
+    { name: "Finviz", regex: /FINVIZ/i },
+    { name: "TradingView", regex: /TRADINGVIEW/i },
+    { name: "Interactive Brokers", regex: /INTERACTIVE BROKERS/i },
+    { name: "IBKR", regex: /IBKR/i },
+    { name: "tastytrade", regex: /TASTYTRADE/i },
+    { name: "tastyworks", regex: /TASTYWORKS/i },
+    { name: "Polygon.io", regex: /POLYGON\.IO/i },
+    { name: "Quandl", regex: /QUANDL/i },
+    { name: "Intrinio", regex: /INTRINIO/i },
+  ];
+
+  const now = new Date();
+  const monthKeys = Array.from({ length: 12 }, (_, index) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (11 - index), 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  const orPatterns = vendorMatchers.map((vendor) => ({ description: vendor.regex }));
+
+  const rows = await db.collection("transactions").find({
+    amount: { $lt: 0 },
+    description: { $ne: null },
+    $or: orPatterns,
+  }).project({ date: 1, description: 1, amount: 1 }).sort({ date: 1 }).toArray();
+
+  const monthlyMap: Record<string, number> = Object.fromEntries(monthKeys.map((month) => [month, 0]));
+  const vendorMap = new Map<string, {
+    name: string;
+    total: number;
+    chargeCount: number;
+    lastCharge: Date | null;
+    monthlyTotals: Record<string, number>;
+  }>();
+
+  const normalizeVendor = (description: string) => {
+    const matched = vendorMatchers.find((vendor) => vendor.regex.test(description));
+    return matched?.name || description.trim();
+  };
+
+  for (const row of rows as { date?: Date; description?: string; amount: number }[]) {
+    const description = row.description || "Unknown";
+    const vendor = normalizeVendor(description);
+    const amount = Math.abs(Number(row.amount) || 0);
+    const date = row.date ? new Date(row.date) : null;
+    const monthKey = date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}` : null;
+
+    if (!vendorMap.has(vendor)) {
+      vendorMap.set(vendor, {
+        name: vendor,
+        total: 0,
+        chargeCount: 0,
+        lastCharge: null,
+        monthlyTotals: {},
+      });
+    }
+
+    const summary = vendorMap.get(vendor)!;
+    summary.total += amount;
+    summary.chargeCount += 1;
+    if (date && (!summary.lastCharge || date > summary.lastCharge)) {
+      summary.lastCharge = date;
+    }
+    if (monthKey) {
+      summary.monthlyTotals[monthKey] = (summary.monthlyTotals[monthKey] || 0) + amount;
+      if (monthKey in monthlyMap) {
+        monthlyMap[monthKey] += amount;
+      }
+    }
+  }
+
+  const monthlyTotals = monthKeys.map((month) => ({ month, total: monthlyMap[month] || 0 }));
+  const avgMonthly = monthlyTotals.reduce((sum, month) => sum + month.total, 0) / monthKeys.length;
+  const grandTotal = Array.from(vendorMap.values()).reduce((sum, vendor) => sum + vendor.total, 0);
+
+  const vendorSummaries = Array.from(vendorMap.values())
+    .map((vendor) => ({
+      name: vendor.name,
+      total: vendor.total,
+      monthlyAvg: vendor.total / monthKeys.length,
+      lastCharge: vendor.lastCharge,
+      chargeCount: vendor.chargeCount,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    vendorSummaries,
+    monthlyTotals,
+    grandTotal,
+    avgMonthly,
+  };
+}
+
 // ─── Auto Repair Timeline ──────────────────────────────────────────────────
 export async function getAutoRepairTimeline() {
   const db = await getDb();
@@ -918,6 +1226,188 @@ export async function getDeliveryVsDineInData(months = 6) {
   ]);
 
   return { deliveryByMonth, dineInByMonth, deliveryMerchants, dineInMerchants };
+}
+
+// ─── Food Battle: Delivery vs Groceries ────────────────────────────────────
+export async function getFoodBattleData(months = 6) {
+  const db = await getDb();
+  const start = new Date();
+  start.setMonth(start.getMonth() - months + 1);
+  start.setDate(1);
+  start.setHours(0, 0, 0, 0);
+
+  const deliveryPatterns = ["UBER EATS", "UBEREATS", "DOORDASH", "GRUBHUB", "INSTACART"];
+  const groceryPatterns = ["KROGER", "HEB", "WHOLE FOODS", "WALMART", "TARGET", "SPROUTS", "COSTCO", "SAMS CLUB", "ALDI", "TRADER JOE"];
+
+  const deliveryRegex = deliveryPatterns.map((pattern) => new RegExp(pattern, "i"));
+  const groceryRegex = groceryPatterns.map((pattern) => new RegExp(pattern, "i"));
+
+  const monthly = await db.collection("transactions").aggregate([
+    {
+      $match: {
+        date: { $gte: start },
+        amount: { $lt: 0 },
+        $or: [
+          { description: { $in: deliveryRegex } },
+          { category: "Groceries" },
+          { description: { $in: groceryRegex } },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } },
+        absoluteAmount: { $abs: "$amount" },
+        bucket: {
+          $switch: {
+            branches: [
+              {
+                case: {
+                  $regexMatch: {
+                    input: { $ifNull: ["$description", ""] },
+                    regex: "UBER EATS|UBEREATS|DOORDASH|GRUBHUB|INSTACART",
+                    options: "i",
+                  },
+                },
+                then: "delivery",
+              },
+              {
+                case: {
+                  $or: [
+                    { $eq: ["$category", "Groceries"] },
+                    {
+                      $regexMatch: {
+                        input: { $ifNull: ["$description", ""] },
+                        regex: "KROGER|HEB|WHOLE FOODS|WALMART|TARGET|SPROUTS|COSTCO|SAMS CLUB|ALDI|TRADER JOE",
+                        options: "i",
+                      },
+                    },
+                  ],
+                },
+                then: "grocery",
+              },
+            ],
+            default: null,
+          },
+        },
+      },
+    },
+    { $match: { bucket: { $in: ["delivery", "grocery"] } } },
+    {
+      $group: {
+        _id: { month: "$monthKey", bucket: "$bucket" },
+        total: { $sum: "$absoluteAmount" },
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { "_id.month": 1 } },
+  ]).toArray();
+
+  const monthMap = new Map<string, { month: string; delivery: number; grocery: number; deliveryCount: number; groceryCount: number; deliveryPct: number }>();
+
+  for (const row of monthly) {
+    const month = row._id.month;
+    const current = monthMap.get(month) ?? {
+      month,
+      delivery: 0,
+      grocery: 0,
+      deliveryCount: 0,
+      groceryCount: 0,
+      deliveryPct: 0,
+    };
+
+    if (row._id.bucket === "delivery") {
+      current.delivery = Number(row.total || 0);
+      current.deliveryCount = Number(row.count || 0);
+    }
+
+    if (row._id.bucket === "grocery") {
+      current.grocery = Number(row.total || 0);
+      current.groceryCount = Number(row.count || 0);
+    }
+
+    monthMap.set(month, current);
+  }
+
+  const data = Array.from(monthMap.values()).map((item) => {
+    const total = item.delivery + item.grocery;
+    return {
+      ...item,
+      delivery: +item.delivery.toFixed(2),
+      grocery: +item.grocery.toFixed(2),
+      deliveryPct: total > 0 ? +((item.delivery / total) * 100).toFixed(1) : 0,
+    };
+  }).sort((a, b) => a.month.localeCompare(b.month));
+
+  const allTime = await db.collection("transactions").aggregate([
+    {
+      $match: {
+        amount: { $lt: 0 },
+        $or: [
+          { description: { $in: deliveryRegex } },
+          { category: "Groceries" },
+          { description: { $in: groceryRegex } },
+        ],
+      },
+    },
+    {
+      $addFields: {
+        absoluteAmount: { $abs: "$amount" },
+        bucket: {
+          $switch: {
+            branches: [
+              {
+                case: {
+                  $regexMatch: {
+                    input: { $ifNull: ["$description", ""] },
+                    regex: "UBER EATS|UBEREATS|DOORDASH|GRUBHUB|INSTACART",
+                    options: "i",
+                  },
+                },
+                then: "delivery",
+              },
+              {
+                case: {
+                  $or: [
+                    { $eq: ["$category", "Groceries"] },
+                    {
+                      $regexMatch: {
+                        input: { $ifNull: ["$description", ""] },
+                        regex: "KROGER|HEB|WHOLE FOODS|WALMART|TARGET|SPROUTS|COSTCO|SAMS CLUB|ALDI|TRADER JOE",
+                        options: "i",
+                      },
+                    },
+                  ],
+                },
+                then: "grocery",
+              },
+            ],
+            default: null,
+          },
+        },
+      },
+    },
+    { $match: { bucket: { $in: ["delivery", "grocery"] } } },
+    {
+      $group: {
+        _id: "$bucket",
+        total: { $sum: "$absoluteAmount" },
+      },
+    },
+  ]).toArray();
+
+  const allTimeTotals = {
+    delivery: +(allTime.find((item) => item._id === "delivery")?.total || 0).toFixed(2),
+    grocery: +(allTime.find((item) => item._id === "grocery")?.total || 0).toFixed(2),
+  };
+
+  const currentMonthRatio = data.length > 0 ? data[data.length - 1].deliveryPct : 0;
+
+  return {
+    data,
+    allTimeTotals,
+    currentMonthRatio,
+  };
 }
 
 // ─── Convenience Store Creep ───────────────────────────────────────────────
