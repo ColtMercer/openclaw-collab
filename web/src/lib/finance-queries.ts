@@ -322,37 +322,104 @@ export async function getDuplicateCharges() {
   const ninetyDaysAgo = new Date();
   ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-  const pipeline = [
-    {
-      $match: {
-        date: { $gte: ninetyDaysAgo },
-        amount: { $lt: 0 },
-        category: { $ne: "Transfer" },
-      },
-    },
-    { $addFields: { dayKey: { $dateToString: { format: "%Y-%m-%d", date: "$date" } } } },
-    {
-      $group: {
-        _id: { day: "$dayKey", description: "$description", amount: "$amount" },
-        count: { $sum: 1 },
-        totalCharged: { $sum: "$amount" },
-      },
-    },
-    { $match: { count: { $gte: 2 } } },
-    {
-      $project: {
-        _id: 0,
-        date: { $dateFromString: { dateString: "$_id.day" } },
-        description: "$_id.description",
-        amount: "$_id.amount",
-        count: 1,
-        totalCharged: 1,
-      },
-    },
-    { $sort: { date: -1 } },
-  ];
+  type DuplicateCandidate = {
+    transaction_id?: string;
+    date: Date;
+    description?: string;
+    amount: number;
+    category?: string | null;
+  };
 
-  return db.collection("transactions").aggregate(pipeline).toArray();
+  type DuplicateCluster = {
+    date: Date;
+    description: string;
+    amount: number;
+    count: number;
+    totalCharged: number;
+    windowHours: number;
+  };
+
+  const transactions = await db.collection("transactions")
+    .find({
+      date: { $gte: ninetyDaysAgo },
+      amount: { $lt: 0 },
+      category: { $ne: "Transfer" },
+    })
+    .project({ transaction_id: 1, date: 1, description: 1, amount: 1, category: 1 })
+    .sort({ description: 1, date: 1, amount: 1 })
+    .toArray() as DuplicateCandidate[];
+
+  const normalizeDescription = (value?: string) => value?.trim().replace(/\s+/g, " ").toLowerCase() || "";
+  const maxWindowMs = 48 * 60 * 60 * 1000;
+  const withinTolerance = (left: number, right: number) => {
+    const leftAbs = Math.abs(left);
+    const rightAbs = Math.abs(right);
+    const base = Math.min(leftAbs, rightAbs);
+    return Math.abs(leftAbs - rightAbs) <= base * 0.05;
+  };
+
+  const byDescription = new Map<string, DuplicateCandidate[]>();
+  for (const tx of transactions) {
+    const normalizedDescription = normalizeDescription(tx.description);
+    if (!normalizedDescription) continue;
+    const list = byDescription.get(normalizedDescription);
+    if (list) list.push(tx);
+    else byDescription.set(normalizedDescription, [tx]);
+  }
+
+  const clusters: DuplicateCluster[] = [];
+
+  for (const group of byDescription.values()) {
+    group.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    let start = 0;
+    while (start < group.length) {
+      let end = start + 1;
+      const cluster = [group[start]];
+      let clusterMin = Math.abs(group[start].amount);
+      let clusterMax = Math.abs(group[start].amount);
+
+      while (end < group.length) {
+        const earliest = group[start].date.getTime();
+        const candidate = group[end];
+        const candidateTime = candidate.date.getTime();
+        if (candidateTime - earliest > maxWindowMs) break;
+
+        const candidateAbs = Math.abs(candidate.amount);
+        const nextMin = Math.min(clusterMin, candidateAbs);
+        const nextMax = Math.max(clusterMax, candidateAbs);
+
+        if (withinTolerance(nextMin, nextMax)) {
+          cluster.push(candidate);
+          clusterMin = nextMin;
+          clusterMax = nextMax;
+          end += 1;
+          continue;
+        }
+
+        break;
+      }
+
+      if (cluster.length >= 2) {
+        const sortedCluster = [...cluster].sort((a, b) => a.date.getTime() - b.date.getTime());
+        const first = sortedCluster[0];
+        const last = sortedCluster[sortedCluster.length - 1];
+        clusters.push({
+          date: first.date,
+          description: first.description || "Unknown",
+          amount: first.amount,
+          count: sortedCluster.length,
+          totalCharged: sortedCluster.reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
+          windowHours: Number((((last.date.getTime() - first.date.getTime()) / (60 * 60 * 1000))).toFixed(1)),
+        });
+        start = end;
+      } else {
+        start += 1;
+      }
+    }
+  }
+
+  return clusters.sort((a, b) => b.date.getTime() - a.date.getTime());
 }
 
 export async function getTransactions(params: {
