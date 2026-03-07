@@ -1,5 +1,35 @@
 import { getDb } from "./finance-db";
 
+export type IncomeSource = {
+  source: string;
+  amount: number;
+  percentage: number;
+  count: number;
+};
+
+export type IncomeTrendPoint = {
+  month: string;
+  total: number;
+};
+
+export type IncomeTransaction = {
+  transaction_id?: string;
+  date: Date | string;
+  description: string;
+  amount: number;
+  category?: string | null;
+};
+
+export type IncomeBreakdownResult = {
+  month: string;
+  totalIncome: number;
+  monthOverMonthChangePct: number | null;
+  payFrequency: "Weekly" | "Bi-weekly" | "Monthly" | "Irregular";
+  incomeSources: IncomeSource[];
+  trend: IncomeTrendPoint[];
+  topTransactions: IncomeTransaction[];
+};
+
 export type CashFlowCalendarDay = {
   date: string;
   income: number;
@@ -45,6 +75,151 @@ function toMonthBounds(month?: string) {
   const end = new Date(year, monthIndex + 1, 1);
   const monthKey = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
   return { start, end, monthKey, daysInMonth: new Date(year, monthIndex + 1, 0).getDate() };
+}
+
+function normalizeIncomeSource(description?: string | null) {
+  const raw = (description || "Unknown").trim();
+  const cleaned = raw
+    .toLowerCase()
+    .replace(/\b(?:ach|ppd id|deposit|credit|direct dep(?:osit)?|directdep|payroll|salary|income|payment|transfer)\b/g, " ")
+    .replace(/[0-9#*]+/g, " ")
+    .replace(/[^a-z\s&.-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return raw || "Unknown";
+
+  const words = cleaned
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1));
+
+  return words.join(" ") || raw || "Unknown";
+}
+
+function getMonthKeys(month: string, count: number) {
+  const [year, monthNum] = month.split("-").map(Number);
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(year, monthNum - 1 - (count - 1 - index), 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+function detectPayFrequency(transactions: IncomeTransaction[]) {
+  const sorted = [...transactions]
+    .filter((tx) => tx.amount >= 500)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  if (sorted.length < 3) return "Irregular" as const;
+
+  const gaps: number[] = [];
+  for (let index = 1; index < sorted.length; index += 1) {
+    const prev = new Date(sorted[index - 1].date).getTime();
+    const current = new Date(sorted[index].date).getTime();
+    gaps.push(Math.round((current - prev) / (1000 * 60 * 60 * 24)));
+  }
+
+  const averageGap = gaps.reduce((sum, gap) => sum + gap, 0) / gaps.length;
+  if (averageGap >= 6 && averageGap <= 9) return "Weekly" as const;
+  if (averageGap >= 12 && averageGap <= 17) return "Bi-weekly" as const;
+  if (averageGap >= 26 && averageGap <= 35) return "Monthly" as const;
+  return "Irregular" as const;
+}
+
+export async function getIncomeBreakdown(month?: string): Promise<IncomeBreakdownResult> {
+  const db = await getDb();
+  const { start, end, monthKey } = toMonthBounds(month);
+  const previousStart = new Date(start.getFullYear(), start.getMonth() - 1, 1);
+  const previousEnd = start;
+  const trendMonthKeys = getMonthKeys(monthKey, 12);
+  const trendStart = new Date(start.getFullYear(), start.getMonth() - 11, 1);
+  const payFrequencyStart = new Date(start.getFullYear(), start.getMonth() - 5, 1);
+
+  const baseFilter = { amount: { $gt: 0 }, category: { $ne: "Transfer" } };
+
+  type TotalRow = { _id: null; total: number };
+  type SourceRow = { _id: string; amount: number; count: number };
+  type TrendRow = { _id: string; total: number };
+
+  const [currentRows, previousRows, sourceRows, trendRows, topTransactions, recurringIncome] = await Promise.all([
+    db.collection("transactions").aggregate<TotalRow>([
+      { $match: { ...baseFilter, date: { $gte: start, $lt: end } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate<TotalRow>([
+      { $match: { ...baseFilter, date: { $gte: previousStart, $lt: previousEnd } } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate<SourceRow>([
+      { $match: { ...baseFilter, date: { $gte: start, $lt: end } } },
+      { $project: { normalizedSource: "$description", amount: 1 } },
+      { $group: { _id: "$normalizedSource", amount: { $sum: "$amount" }, count: { $sum: 1 } } },
+      { $sort: { amount: -1 } },
+      { $limit: 100 },
+    ]).toArray(),
+    db.collection("transactions").aggregate<TrendRow>([
+      { $match: { ...baseFilter, date: { $gte: trendStart, $lt: end } } },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      { $group: { _id: "$monthKey", total: { $sum: "$amount" } } },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions")
+      .find({ ...baseFilter, date: { $gte: start, $lt: end } })
+      .project({ transaction_id: 1, date: 1, description: 1, amount: 1, category: 1 })
+      .sort({ amount: -1, date: -1 })
+      .limit(5)
+      .toArray() as Promise<IncomeTransaction[]>,
+    db.collection("transactions")
+      .find({ ...baseFilter, date: { $gte: payFrequencyStart, $lt: end } })
+      .project({ transaction_id: 1, date: 1, description: 1, amount: 1, category: 1 })
+      .sort({ date: 1 })
+      .toArray() as Promise<IncomeTransaction[]>,
+  ]);
+
+  const totalIncome = currentRows[0]?.total || 0;
+  const previousIncome = previousRows[0]?.total || 0;
+  const monthOverMonthChangePct = previousIncome > 0
+    ? ((totalIncome - previousIncome) / previousIncome) * 100
+    : null;
+
+  const groupedSources = new Map<string, { amount: number; count: number }>();
+  for (const row of sourceRows) {
+    const source = normalizeIncomeSource(row._id);
+    const existing = groupedSources.get(source) || { amount: 0, count: 0 };
+    existing.amount += row.amount || 0;
+    existing.count += row.count || 0;
+    groupedSources.set(source, existing);
+  }
+
+  const incomeSources: IncomeSource[] = Array.from(groupedSources.entries())
+    .map(([source, value]) => ({
+      source,
+      amount: value.amount,
+      count: value.count,
+      percentage: totalIncome > 0 ? (value.amount / totalIncome) * 100 : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 10);
+
+  const trendMap = new Map(trendRows.map((row) => [row._id, row.total || 0]));
+  const trend: IncomeTrendPoint[] = trendMonthKeys.map((key) => ({ month: key, total: trendMap.get(key) || 0 }));
+
+  return {
+    month: monthKey,
+    totalIncome,
+    monthOverMonthChangePct,
+    payFrequency: detectPayFrequency(recurringIncome),
+    incomeSources,
+    trend,
+    topTransactions: topTransactions.map((tx) => ({
+      transaction_id: tx.transaction_id,
+      date: tx.date,
+      description: tx.description || "Unknown",
+      amount: tx.amount,
+      category: tx.category,
+    })),
+  };
 }
 
 export async function getCashFlowCalendar(month?: string): Promise<CashFlowCalendarResult> {
@@ -2300,4 +2475,338 @@ export async function getRestaurantData(months = 12) {
   const totalVisits = merchants.reduce((s, m) => s + m.count, 0);
 
   return { merchants, byMonth, recentTransactions, totalSpend, totalVisits };
+}
+
+// ─── Category Accuracy Auditor ────────────────────────────────────────────
+type CategoryMismatch = {
+  description: string;
+  amount: number;
+  date: string;
+  currentCategory: string;
+  suggestedCategory: string;
+  confidence: "high" | "medium";
+};
+
+const CATEGORY_AUDITOR_RULES = [
+  {
+    suggestedCategory: "Legal",
+    confidence: "high" as const,
+    keywords: ["coker robb", "attorney", "legal", "law firm", "esquire", "law group", "paralegal"],
+  },
+  {
+    suggestedCategory: "Auto Maintenance",
+    confidence: "high" as const,
+    keywords: ["rev-up", "integrity-1st", "integrity 1st", "jiffy lube", "firestone", "pep boys", "midas", "transmission", "brake", "oil change", "auto repair", "tire"],
+  },
+  {
+    suggestedCategory: "Legal",
+    confidence: "medium" as const,
+    keywords: ["attorney", "legal", "esquire", "paralegal", "law"],
+  },
+  {
+    suggestedCategory: "Medical",
+    confidence: "high" as const,
+    keywords: ["hospital", "clinic", "urgent care", "pharmacy", "cvs", "walgreens", "dental", "optometry", "vision"],
+  },
+  {
+    suggestedCategory: "Auto Maintenance",
+    confidence: "medium" as const,
+    keywords: ["brake", "tire", "oil", "repair", "transmission", "auto"],
+  },
+  {
+    suggestedCategory: "Groceries",
+    confidence: "high" as const,
+    keywords: ["whole foods", "kroger", "safeway", "heb", "trader joe", "aldi", "publix"],
+  },
+  {
+    suggestedCategory: "Medical",
+    confidence: "medium" as const,
+    keywords: ["clinic", "pharmacy", "cvs", "walgreens", "dental", "vision", "optometry", "medical"],
+  },
+  {
+    suggestedCategory: "Pet",
+    confidence: "high" as const,
+    keywords: ["petco", "petsmart", "vet", "veterinary", "animal hospital"],
+  },
+  {
+    suggestedCategory: "Groceries",
+    confidence: "medium" as const,
+    keywords: ["grocery", "market", "foods", "kroger", "aldi", "publix"],
+  },
+  {
+    suggestedCategory: "Pet",
+    confidence: "medium" as const,
+    keywords: ["vet"],
+  },
+] as const;
+
+function normalizeCategory(value: string | null | undefined): string {
+  return (value || "Uncategorized").trim();
+}
+
+function normalizeCategoryLoose(value: string | null | undefined): string {
+  return normalizeCategory(value)
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectSuggestedCategory(description: string): Pick<CategoryMismatch, "suggestedCategory" | "confidence"> | null {
+  const lower = description.toLowerCase();
+
+  for (const rule of CATEGORY_AUDITOR_RULES) {
+    if (rule.keywords.some((keyword) => lower.includes(keyword))) {
+      return { suggestedCategory: rule.suggestedCategory, confidence: rule.confidence };
+    }
+  }
+
+  return null;
+}
+
+export async function getCategoryMismatches(): Promise<CategoryMismatch[]> {
+  const db = await getDb();
+  const start = new Date();
+  start.setMonth(start.getMonth() - 6);
+
+  type TransactionRow = {
+    description?: string;
+    amount: number;
+    date: Date;
+    category?: string | null;
+  };
+
+  const rows = await db.collection("transactions").find({
+    date: { $gte: start },
+    amount: { $lt: -200 },
+    description: { $exists: true, $ne: null },
+  }).project({ description: 1, amount: 1, date: 1, category: 1 }).toArray() as TransactionRow[];
+
+  return rows
+    .map((row) => {
+      const description = (row.description || "").trim();
+      if (!description) return null;
+
+      const detected = detectSuggestedCategory(description);
+      if (!detected) return null;
+
+      const currentCategory = normalizeCategory(row.category);
+      const currentLoose = normalizeCategoryLoose(currentCategory);
+      const suggestedLoose = normalizeCategoryLoose(detected.suggestedCategory);
+      if (currentLoose.includes(suggestedLoose) || suggestedLoose.includes(currentLoose)) return null;
+
+      return {
+        description,
+        amount: Math.abs(Number(row.amount) || 0),
+        date: new Date(row.date).toISOString(),
+        currentCategory,
+        suggestedCategory: detected.suggestedCategory,
+        confidence: detected.confidence,
+      } satisfies CategoryMismatch;
+    })
+    .filter((row): row is CategoryMismatch => Boolean(row))
+    .sort((a, b) => b.amount - a.amount);
+}
+
+// ─── Rent Tracker ─────────────────────────────────────────────────────────
+type RentTrackerPayment = {
+  month: string;
+  amount: number;
+  date: string;
+  description: string;
+};
+
+type RentTrackerMonth = {
+  month: string;
+  amount: number;
+};
+
+type RentTrackerHistoryRow = {
+  month: string;
+  amount: number;
+  date: string | null;
+  description: string | null;
+  status: "Paid" | "Gap";
+};
+
+export async function getRentTrackerData() {
+  const db = await getDb();
+
+  type RentRow = {
+    description?: string;
+    amount: number;
+    date: Date;
+  };
+
+  const rows = await db.collection("transactions").find({
+    amount: { $lt: 0 },
+    $or: [
+      { description: /ali\s+khan/i },
+      { description: /zelle/i, $expr: { $regexMatch: { input: "$description", regex: /lavaca/i } } },
+    ],
+  }).project({ description: 1, amount: 1, date: 1 }).sort({ date: 1 }).toArray() as RentRow[];
+
+  const payments: RentTrackerPayment[] = rows.map((row) => ({
+    month: `${new Date(row.date).getFullYear()}-${String(new Date(row.date).getMonth() + 1).padStart(2, "0")}`,
+    amount: Math.abs(Number(row.amount) || 0),
+    date: new Date(row.date).toISOString(),
+    description: row.description || "",
+  }));
+
+  const monthlyMap = new Map<string, RentTrackerHistoryRow>();
+  for (const payment of payments) {
+    const existing = monthlyMap.get(payment.month);
+    if (!existing) {
+      monthlyMap.set(payment.month, {
+        month: payment.month,
+        amount: payment.amount,
+        date: payment.date,
+        description: payment.description,
+        status: "Paid",
+      });
+      continue;
+    }
+
+    existing.amount += payment.amount;
+    if (existing.date && new Date(payment.date) > new Date(existing.date)) {
+      existing.date = payment.date;
+      existing.description = payment.description;
+    }
+  }
+
+  const paidMonths = Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month));
+
+  const monthKeys: string[] = [];
+  if (paidMonths.length > 0) {
+    const first = paidMonths[0].month.split("-").map(Number);
+    const last = paidMonths[paidMonths.length - 1].month.split("-").map(Number);
+    let cursor = new Date(first[0], first[1] - 1, 1);
+    const end = new Date(last[0], last[1] - 1, 1);
+
+    while (cursor <= end) {
+      monthKeys.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`);
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    }
+  }
+
+  const monthlyHistory: RentTrackerMonth[] = monthKeys.map((month) => ({
+    month,
+    amount: monthlyMap.get(month)?.amount || 0,
+  }));
+
+  const historyWithGaps: RentTrackerHistoryRow[] = monthKeys.map((month) => {
+    const existing = monthlyMap.get(month);
+    if (existing) return existing;
+    return { month, amount: 0, date: null, description: null, status: "Gap" };
+  });
+
+  const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const paymentCount = payments.length;
+  const monthlyAvg = paidMonths.length > 0 ? totalPaid / paidMonths.length : 0;
+  const currentMonthlyRate = [...paidMonths].reverse().find((row) => row.amount > 0)?.amount || 0;
+  const firstPayment = payments[0] || null;
+  const latestPayment = payments[payments.length - 1] || null;
+  return {
+    payments,
+    totalPaid,
+    monthlyAvg,
+    currentMonthlyRate,
+    firstPayment,
+    latestPayment,
+    paymentCount,
+    monthlyHistory,
+    historyWithGaps,
+    gaps: historyWithGaps.filter((row) => row.status === "Gap").map((row) => row.month),
+  };
+}
+
+// ─── API Usage Spike Detector ─────────────────────────────────────────────
+const API_VENDOR_DEFINITIONS = [
+  { name: "OpenAI", keywords: ["openai"] },
+  { name: "Anthropic", keywords: ["anthropic"] },
+  { name: "Claude", keywords: ["claude"] },
+  { name: "ElevenLabs", keywords: ["elevenlabs"] },
+  { name: "Replicate", keywords: ["replicate"] },
+  { name: "Stability", keywords: ["stability", "stability ai"] },
+  { name: "Mistral", keywords: ["mistral"] },
+  { name: "Groq", keywords: ["groq"] },
+  { name: "Together", keywords: ["together", "together ai"] },
+  { name: "Fireworks", keywords: ["fireworks", "fireworks ai"] },
+  { name: "Perplexity", keywords: ["perplexity"] },
+  { name: "Cohere", keywords: ["cohere"] },
+] as const;
+
+function detectApiVendor(description: string): string | null {
+  const lower = description.toLowerCase();
+  const match = API_VENDOR_DEFINITIONS.find((vendor) => vendor.keywords.some((keyword) => lower.includes(keyword)));
+  return match?.name || null;
+}
+
+export async function getAPIUsageSpikeData() {
+  const db = await getDb();
+  const regex = new RegExp(API_VENDOR_DEFINITIONS.flatMap((vendor) => vendor.keywords).join("|"), "i");
+
+  type ApiRow = {
+    description?: string;
+    amount: number;
+    date: Date;
+  };
+
+  const rows = await db.collection("transactions").find({
+    amount: { $lt: 0 },
+    description: { $regex: regex },
+  }).project({ description: 1, amount: 1, date: 1 }).sort({ date: 1 }).toArray() as ApiRow[];
+
+  const monthlyMap = new Map<string, { month: string; vendor: string; count: number; total: number }>();
+  for (const row of rows) {
+    const description = row.description || "";
+    const vendor = detectApiVendor(description);
+    if (!vendor) continue;
+    const date = new Date(row.date);
+    const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const key = `${vendor}::${month}`;
+    if (!monthlyMap.has(key)) {
+      monthlyMap.set(key, { month, vendor, count: 0, total: 0 });
+    }
+    const current = monthlyMap.get(key)!;
+    current.count += 1;
+    current.total += Math.abs(Number(row.amount) || 0);
+  }
+
+  const monthlyBreakdown = Array.from(monthlyMap.values()).sort((a, b) => {
+    const monthCompare = a.month.localeCompare(b.month);
+    return monthCompare !== 0 ? monthCompare : a.vendor.localeCompare(b.vendor);
+  });
+
+  const latestMonth = monthlyBreakdown[monthlyBreakdown.length - 1]?.month || "";
+
+  const vendors = API_VENDOR_DEFINITIONS.map((vendor) => {
+    const entries = monthlyBreakdown.filter((row) => row.vendor === vendor.name).sort((a, b) => a.month.localeCompare(b.month));
+    const currentMonth = entries.find((row) => row.month === latestMonth) || { count: 0, total: 0, month: latestMonth, vendor: vendor.name };
+    const priorEntries = entries.filter((row) => row.month < latestMonth);
+    const trailing = priorEntries.slice(-3);
+    const trailingAvgCount = trailing.length > 0 ? trailing.reduce((sum, row) => sum + row.count, 0) / trailing.length : 0;
+    const trailingAvgTotal = trailing.length > 0 ? trailing.reduce((sum, row) => sum + row.total, 0) / trailing.length : 0;
+    const avgMonthly = priorEntries.length > 0 ? priorEntries.reduce((sum, row) => sum + row.total, 0) / priorEntries.length : currentMonth.total;
+    const avgCount = priorEntries.length > 0 ? priorEntries.reduce((sum, row) => sum + row.count, 0) / priorEntries.length : currentMonth.count;
+    const countSpike = trailingAvgCount > 0 && currentMonth.count >= trailingAvgCount * 3;
+    const totalSpike = trailingAvgTotal > 0 && currentMonth.total >= trailingAvgTotal * 2;
+    const pctAboveAvg = avgMonthly > 0 ? ((currentMonth.total - avgMonthly) / avgMonthly) * 100 : 0;
+
+    return {
+      name: vendor.name,
+      currentMonth: { count: currentMonth.count, total: currentMonth.total, month: currentMonth.month },
+      avgMonthly,
+      avgCount,
+      trailingAvgCount,
+      trailingAvgTotal,
+      isSpike: countSpike || totalSpike,
+      pctAboveAvg,
+    };
+  }).filter((vendor) => vendor.currentMonth.count > 0 || vendor.avgMonthly > 0);
+
+  const totalApiSpend = monthlyBreakdown.reduce((sum, row) => sum + row.total, 0);
+
+  return { vendors, monthlyBreakdown, totalApiSpend, latestMonth };
 }

@@ -10,6 +10,7 @@ const sections = [
       { href: "/finance", label: "Dashboard", icon: "📊" },
       { href: "/finance/transactions", label: "Transactions", icon: "💳" },
       { href: "/finance/cashflow", label: "Cash Flow", icon: "📈" },
+      { href: "/finance/income", label: "Income Breakdown", icon: "💰" },
     ],
   },
   {
@@ -42,6 +43,8 @@ const sections = [
       { href: "/finance/utilities", label: "Utilities", icon: "⚡" },
       { href: "/finance/duplicate-charges", label: "Duplicate Charges", icon: "🧾" },
       { href: "/finance/auto-repairs", label: "Auto Repairs", icon: "🔧" },
+      { href: "/finance/category-auditor", label: "Category Auditor", icon: "📋" },
+      { href: "/finance/api-spikes", label: "API Spikes", icon: "🔔" },
       { href: "/finance/insurance-events", label: "Insurance Events", icon: "🏥" },
     ],
   },
@@ -49,6 +52,7 @@ const sections = [
     label: "Tools",
     links: [
       { href: "/finance/amazon-import", label: "Amazon Import", icon: "🛒" },
+      { href: "/finance/rent-tracker", label: "Rent Tracker", icon: "🏠" },
       { href: "/finance/rules", label: "Rules", icon: "⚙️" },
     ],
   },

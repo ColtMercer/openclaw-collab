@@ -1,13 +1,11 @@
 import SocialClient from "@/app/social/SocialClient"
 import {
-  ensureSocialSeedData,
   getSocialCollection,
   serializeSocialPost,
 } from "@/lib/social-db"
 import type { SocialPost } from "@/types"
 
 export default async function SocialPage() {
-  await ensureSocialSeedData()
   const collection = await getSocialCollection()
   const posts = await collection
     .find({})
