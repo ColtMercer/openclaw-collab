@@ -64,6 +64,21 @@ export type CashFlowCalendarResult = {
   summary: CashFlowCalendarSummary;
 };
 
+export type NetWorthSnapshotAccount = {
+  name: string;
+  balance: number;
+  type: "asset" | "liability";
+};
+
+export type NetWorthSnapshotResult = {
+  netWorth: number;
+  assets: number;
+  liabilities: number;
+  momDelta: number;
+  momDeltaPct: number | null;
+  accounts: NetWorthSnapshotAccount[];
+};
+
 function toMonthBounds(month?: string) {
   const now = new Date();
   const parsed = month && /^\d{4}-\d{2}$/.test(month)
@@ -316,6 +331,93 @@ export async function getCashFlowCalendar(month?: string): Promise<CashFlowCalen
       totalExpenses,
       totalNet,
     },
+  };
+}
+
+export async function getNetWorthSnapshot(): Promise<NetWorthSnapshotResult> {
+  const db = await getDb();
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  type BalanceRow = {
+    _id: string | null;
+    balance: number;
+  };
+
+  const [allTimeRows, currentMonthRows] = await Promise.all([
+    db.collection("transactions").aggregate<BalanceRow>([
+      {
+        $match: {
+          account: { $exists: true, $nin: [null, ""] },
+          amount: { $type: "number" },
+        },
+      },
+      {
+        $group: {
+          _id: "$account",
+          balance: { $sum: "$amount" },
+        },
+      },
+    ]).toArray(),
+    db.collection("transactions").aggregate<BalanceRow>([
+      {
+        $match: {
+          account: { $exists: true, $nin: [null, ""] },
+          amount: { $type: "number" },
+          date: { $gte: currentMonthStart },
+        },
+      },
+      {
+        $group: {
+          _id: "$account",
+          balance: { $sum: "$amount" },
+        },
+      },
+    ]).toArray(),
+  ]);
+
+  const currentMonthMap = new Map(
+    currentMonthRows.map((row) => [row._id || "Unknown", row.balance || 0]),
+  );
+
+  const accounts = allTimeRows
+    .map<NetWorthSnapshotAccount>((row) => {
+      const name = row._id || "Unknown";
+      const balance = row.balance || 0;
+
+      return {
+        name,
+        balance,
+        type: balance >= 0 ? "asset" : "liability",
+      };
+    })
+    .sort((left, right) => Math.abs(right.balance) - Math.abs(left.balance));
+
+  const assets = accounts
+    .filter((account) => account.balance > 0)
+    .reduce((sum, account) => sum + account.balance, 0);
+  const liabilities = accounts
+    .filter((account) => account.balance < 0)
+    .reduce((sum, account) => sum + account.balance, 0);
+  const netWorth = assets + liabilities;
+
+  const previousMonthNetWorth = accounts.reduce((sum, account) => {
+    const currentMonthChange = currentMonthMap.get(account.name) || 0;
+    return sum + (account.balance - currentMonthChange);
+  }, 0);
+
+  const momDelta = netWorth - previousMonthNetWorth;
+  const momDeltaPct = previousMonthNetWorth === 0
+    ? null
+    : (momDelta / Math.abs(previousMonthNetWorth)) * 100;
+
+  return {
+    netWorth,
+    assets,
+    liabilities,
+    momDelta,
+    momDeltaPct,
+    accounts,
   };
 }
 

@@ -8,6 +8,7 @@ const sections = [
     label: "Overview",
     links: [
       { href: "/finance", label: "Dashboard", icon: "📊" },
+      { href: "/finance/net-worth", label: "Net Worth", icon: "🏦" },
       { href: "/finance/transactions", label: "Transactions", icon: "💳" },
       { href: "/finance/cashflow", label: "Cash Flow", icon: "📈" },
       { href: "/finance/income", label: "Income Breakdown", icon: "💰" },
