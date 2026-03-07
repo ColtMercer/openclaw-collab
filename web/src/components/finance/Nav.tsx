@@ -31,6 +31,7 @@ const sections = [
       { href: "/finance/anomalies", label: "Anomalies", icon: "🚨" },
       { href: "/finance/velocity", label: "Spending Velocity", icon: "🔥" },
       { href: "/finance/heatmap", label: "Spending Heatmap", icon: "🗓️" },
+      { href: "/finance/cash-flow-calendar", label: "Cash Flow Calendar", icon: "💵" },
       { href: "/finance/restaurants", label: "Restaurants", icon: "🍽️" },
       { href: "/finance/delivery-vs-dinein", label: "Delivery vs Dining", icon: "🚗" },
       { href: "/finance/food-battle", label: "Food Battle", icon: "🍔" },

@@ -1,5 +1,149 @@
 import { getDb } from "./finance-db";
 
+export type CashFlowCalendarDay = {
+  date: string;
+  income: number;
+  expenses: number;
+  net: number;
+  transactionCount: number;
+  isPaycheckDay: boolean;
+};
+
+export type CashFlowCalendarSummary = {
+  biggestSpendDay: {
+    date: string;
+    expenses: number;
+    net: number;
+  } | null;
+  mostFrequentBigSpendDayOfWeek: {
+    dayOfWeek: string;
+    count: number;
+  } | null;
+  avgDailyBurn: number;
+  totalIncome: number;
+  totalExpenses: number;
+  totalNet: number;
+};
+
+export type CashFlowCalendarResult = {
+  month: string;
+  startDate: string;
+  endDate: string;
+  daysInMonth: number;
+  days: CashFlowCalendarDay[];
+  summary: CashFlowCalendarSummary;
+};
+
+function toMonthBounds(month?: string) {
+  const now = new Date();
+  const parsed = month && /^\d{4}-\d{2}$/.test(month)
+    ? month.split("-").map(Number)
+    : [now.getFullYear(), now.getMonth() + 1];
+  const year = parsed[0];
+  const monthIndex = parsed[1] - 1;
+  const start = new Date(year, monthIndex, 1);
+  const end = new Date(year, monthIndex + 1, 1);
+  const monthKey = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+  return { start, end, monthKey, daysInMonth: new Date(year, monthIndex + 1, 0).getDate() };
+}
+
+export async function getCashFlowCalendar(month?: string): Promise<CashFlowCalendarResult> {
+  const db = await getDb();
+  const { start, end, monthKey, daysInMonth } = toMonthBounds(month);
+
+  const pipeline = [
+    {
+      $match: {
+        date: { $gte: start, $lt: end },
+        amount: { $ne: null },
+        category: { $ne: "Transfer" },
+      },
+    },
+    {
+      $addFields: {
+        dateKey: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+      },
+    },
+    {
+      $group: {
+        _id: "$dateKey",
+        income: { $sum: { $cond: [{ $gt: ["$amount", 0] }, "$amount", 0] } },
+        expenses: { $sum: { $cond: [{ $lt: ["$amount", 0] }, { $abs: "$amount" }, 0] } },
+        net: { $sum: "$amount" },
+        positiveTransactionCount: { $sum: { $cond: [{ $gt: ["$amount", 0] }, 1, 0] } },
+        maxPositiveAmount: { $max: { $cond: [{ $gt: ["$amount", 0] }, "$amount", 0] } },
+        transactionCount: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ];
+
+  type AggregateRow = {
+    _id: string;
+    income: number;
+    expenses: number;
+    net: number;
+    positiveTransactionCount: number;
+    maxPositiveAmount: number;
+    transactionCount: number;
+  };
+
+  const rows = await db.collection("transactions").aggregate<AggregateRow>(pipeline).toArray();
+  const maxPositiveAmount = rows.reduce((max, row) => Math.max(max, row.maxPositiveAmount || 0), 0);
+  const paycheckThreshold = Math.max(1000, maxPositiveAmount * 0.6);
+
+  const days: CashFlowCalendarDay[] = rows.map((row) => ({
+    date: row._id,
+    income: row.income || 0,
+    expenses: row.expenses || 0,
+    net: row.net || 0,
+    transactionCount: row.transactionCount || 0,
+    isPaycheckDay: (row.positiveTransactionCount || 0) > 0 && (row.maxPositiveAmount || 0) >= paycheckThreshold,
+  }));
+
+  const biggestSpendDay = days
+    .filter((day) => day.expenses > 0)
+    .sort((a, b) => b.expenses - a.expenses)[0];
+
+  const bigSpendThreshold = days.length > 0
+    ? Math.max(100, [...days].sort((a, b) => b.expenses - a.expenses)[Math.max(0, Math.ceil(days.length * 0.2) - 1)]?.expenses || 0)
+    : 0;
+
+  const spendDayCounts = new Map<string, number>();
+  for (const day of days) {
+    if (day.expenses < bigSpendThreshold || bigSpendThreshold <= 0) continue;
+    const weekday = new Date(`${day.date}T12:00:00`).toLocaleDateString("en-US", { weekday: "long" });
+    spendDayCounts.set(weekday, (spendDayCounts.get(weekday) || 0) + 1);
+  }
+
+  const mostFrequentBigSpendDayOfWeek = Array.from(spendDayCounts.entries())
+    .sort((a, b) => b[1] - a[1])[0];
+
+  const totalIncome = days.reduce((sum, day) => sum + day.income, 0);
+  const totalExpenses = days.reduce((sum, day) => sum + day.expenses, 0);
+  const totalNet = days.reduce((sum, day) => sum + day.net, 0);
+
+  return {
+    month: monthKey,
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
+    daysInMonth,
+    days,
+    summary: {
+      biggestSpendDay: biggestSpendDay
+        ? { date: biggestSpendDay.date, expenses: biggestSpendDay.expenses, net: biggestSpendDay.net }
+        : null,
+      mostFrequentBigSpendDayOfWeek: mostFrequentBigSpendDayOfWeek
+        ? { dayOfWeek: mostFrequentBigSpendDayOfWeek[0], count: mostFrequentBigSpendDayOfWeek[1] }
+        : null,
+      avgDailyBurn: daysInMonth > 0 ? totalExpenses / daysInMonth : 0,
+      totalIncome,
+      totalExpenses,
+      totalNet,
+    },
+  };
+}
+
 const AI_SPEND_KEYWORDS = [
   "openai", "anthropic", "claude", "chatgpt", "midjourney", "github copilot",
   "cursor", "perplexity", "cohere", "replicate", "together ai", "groq",
