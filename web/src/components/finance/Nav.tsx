@@ -41,6 +41,7 @@ const sections = [
       { href: "/finance/utilities", label: "Utilities", icon: "⚡" },
       { href: "/finance/duplicate-charges", label: "Duplicate Charges", icon: "🧾" },
       { href: "/finance/auto-repairs", label: "Auto Repairs", icon: "🔧" },
+      { href: "/finance/insurance-events", label: "Insurance Events", icon: "🏥" },
     ],
   },
   {

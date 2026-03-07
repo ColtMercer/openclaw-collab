@@ -1150,6 +1150,133 @@ export async function getAutoRepairTimeline() {
   return db.collection("transactions").aggregate(pipeline).toArray();
 }
 
+export async function getInsuranceEventData() {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 23, 1);
+  const insuranceRegex = /insurance/i;
+
+  const [transactions, monthlyRows, dayRows, merchantRows] = await Promise.all([
+    db.collection("transactions")
+      .find({
+        date: { $gte: start },
+        category: { $regex: insuranceRegex },
+        amount: { $ne: null },
+      })
+      .project({ _id: 0, date: 1, description: 1, amount: 1, category: 1 })
+      .sort({ date: -1 })
+      .toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: start },
+          category: { $regex: insuranceRegex },
+          amount: { $ne: null },
+        },
+      },
+      { $addFields: { monthKey: { $dateToString: { format: "%Y-%m", date: "$date" } } } },
+      {
+        $group: {
+          _id: "$monthKey",
+          total: { $sum: { $abs: "$amount" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: start },
+          category: { $regex: insuranceRegex },
+          amount: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: { $dayOfMonth: "$date" },
+          count: { $sum: 1 },
+          totalAmount: { $sum: { $abs: "$amount" } },
+        },
+      },
+      { $sort: { count: -1, _id: 1 } },
+    ]).toArray(),
+    db.collection("transactions").aggregate([
+      {
+        $match: {
+          date: { $gte: start },
+          category: { $regex: insuranceRegex },
+          amount: { $ne: null },
+          description: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: "$description",
+          count: { $sum: 1 },
+          total: { $sum: { $abs: "$amount" } },
+          avgAmount: { $avg: { $abs: "$amount" } },
+        },
+      },
+      { $sort: { count: -1, total: -1, _id: 1 } },
+      { $limit: 10 },
+    ]).toArray(),
+  ]);
+
+  const allTransactions = (transactions as { date: Date; description?: string; amount: number; category?: string }[])
+    .map((tx) => ({
+      date: tx.date,
+      description: tx.description || "Unknown",
+      amount: Math.abs(Number(tx.amount) || 0),
+      category: tx.category || "Insurance",
+    }));
+
+  const rollingAverage = allTransactions.length > 0
+    ? allTransactions.reduce((sum, tx) => sum + tx.amount, 0) / allTransactions.length
+    : 0;
+
+  const largeEvents = allTransactions
+    .filter((tx) => rollingAverage > 0 && tx.amount > rollingAverage * 2)
+    .map((tx) => ({
+      ...tx,
+      multiplier: tx.amount / rollingAverage,
+    }));
+
+  const monthKeys = Array.from({ length: 24 }, (_, index) => {
+    const d = new Date(start.getFullYear(), start.getMonth() + index, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  const monthlyMap = new Map((monthlyRows as { _id: string; total: number; count: number }[]).map((row) => [
+    row._id,
+    { month: row._id, total: row.total, count: row.count },
+  ]));
+
+  const monthlyTotals = monthKeys.map((month) => monthlyMap.get(month) || { month, total: 0, count: 0 });
+
+  const dayOfMonthPatterns = (dayRows as { _id: number; count: number; totalAmount: number }[]).map((row) => ({
+    day: row._id,
+    count: row.count,
+    totalAmount: row.totalAmount,
+  }));
+
+  const topMerchants = (merchantRows as { _id: string; count: number; total: number; avgAmount: number }[]).map((row) => ({
+    description: row._id || "Unknown",
+    count: row.count,
+    total: row.total,
+    avgAmount: row.avgAmount,
+  }));
+
+  return {
+    allTransactions,
+    rollingAverage,
+    largeEvents,
+    monthlyTotals,
+    dayOfMonthPatterns,
+    topMerchants,
+  };
+}
+
 // ─── Spending Heatmap Calendar ─────────────────────────────────────────────
 export async function getSpendingHeatmapData(year: number, month: number) {
   const db = await getDb();
