@@ -51,6 +51,30 @@ export default function ConvenienceClient({ byMonth, byMerchant, recentTransacti
   const monthsWithData = byMonth.length;
   const avgPerMonth = monthsWithData > 0 ? totalSpend / monthsWithData : 0;
   const avgVisitsPerMonth = monthsWithData > 0 ? totalVisits / monthsWithData : 0;
+  const visitsPerWeek = monthsWithData > 0 ? totalVisits / (monthsWithData * 4.33) : 0;
+  const annualEst = avgPerMonth * 12;
+
+  const midpoint = Math.floor(byMonth.length / 2);
+  const firstHalf = byMonth.slice(0, midpoint);
+  const secondHalf = byMonth.slice(midpoint);
+  const firstHalfAvg = firstHalf.length > 0
+    ? firstHalf.reduce((sum, month) => sum + month.total, 0) / firstHalf.length
+    : 0;
+  const secondHalfAvg = secondHalf.length > 0
+    ? secondHalf.reduce((sum, month) => sum + month.total, 0) / secondHalf.length
+    : 0;
+
+  let trendLabel = "➡️ Stable";
+  if (firstHalf.length > 0 && secondHalf.length > 0) {
+    if (secondHalfAvg > firstHalfAvg * 1.1) trendLabel = "📈 Trending Up";
+    else if (secondHalfAvg < firstHalfAvg * 0.9) trendLabel = "📉 Trending Down";
+  }
+
+  const annualInsightClasses = annualEst < 500
+    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+    : annualEst <= 1200
+      ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+      : "bg-red-500/10 border-red-500/30 text-red-300";
 
   const chartData = byMonth.map((b) => ({
     month: fmtMonth(b._id),
@@ -84,9 +108,9 @@ export default function ConvenienceClient({ byMonth, byMerchant, recentTransacti
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
         <div className="bg-[#141420] border border-[#27272a] rounded-xl p-4">
-          <div className="text-xs text-zinc-500 mb-1">Total Spend (6mo)</div>
+          <div className="text-xs text-zinc-500 mb-1">Total Spend (12mo)</div>
           <div className="text-xl font-bold text-amber-400">{formatCurrency(totalSpend)}</div>
         </div>
         <div className="bg-[#141420] border border-[#27272a] rounded-xl p-4">
@@ -102,6 +126,10 @@ export default function ConvenienceClient({ byMonth, byMerchant, recentTransacti
           <div className="text-xl font-bold text-zinc-300">{formatCurrency(avgPerMonth)}</div>
           <div className="text-xs text-zinc-500">{avgVisitsPerMonth.toFixed(1)} visits</div>
         </div>
+        <div className="bg-[#141420] border border-[#27272a] rounded-xl p-4">
+          <div className="text-xs text-zinc-500 mb-1">Visits / Week</div>
+          <div className="text-xl font-bold text-zinc-300">{visitsPerWeek.toFixed(1)}</div>
+        </div>
         {latestMonth && (
           <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
             <div className="text-xs text-amber-400 mb-1">This Month</div>
@@ -111,11 +139,23 @@ export default function ConvenienceClient({ byMonth, byMerchant, recentTransacti
         )}
       </div>
 
+      <div className={`border rounded-xl p-4 ${annualInsightClasses}`}>
+        <span className="font-semibold">Insight: </span>
+        <span>
+          At this pace, you spend ~{formatCurrency(annualEst)}/year at convenience stores (est. from last 12 months).
+        </span>
+      </div>
+
       {/* Monthly Trend */}
       <div className="bg-[#141420] border border-[#27272a] rounded-xl p-5">
-        <h2 className="text-lg font-semibold mb-4">Monthly Spend Trend</h2>
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <h2 className="text-lg font-semibold">Monthly Spend Trend</h2>
+          <span className="text-xs rounded-full border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-zinc-300 whitespace-nowrap">
+            {trendLabel}
+          </span>
+        </div>
         {chartData.length === 0 ? (
-          <p className="text-zinc-500 text-sm">No convenience store transactions found in the last 6 months.</p>
+          <p className="text-zinc-500 text-sm">No convenience store transactions found in the last 12 months.</p>
         ) : (
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>

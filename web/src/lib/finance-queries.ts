@@ -1541,7 +1541,7 @@ export async function getFoodBattleData(months = 6) {
 }
 
 // ─── Convenience Store Creep ───────────────────────────────────────────────
-export async function getConvenienceStoreData(months = 6) {
+export async function getConvenienceStoreData(months = 12) {
   const db = await getDb();
   const start = new Date();
   start.setMonth(start.getMonth() - months + 1);
@@ -1552,7 +1552,8 @@ export async function getConvenienceStoreData(months = 6) {
     "7-eleven", "7eleven", "quiktrip", "qt ", " qt\\b", "wawa", "sheetz",
     "casey's", "circle k", "speedway", "ampm", "am-pm", "shell", "chevron",
     "exxon", "bp ", "sunoco", "marathon", "pilot", "flying j", "love's",
-    "kum & go", "kwik trip", "kwiktrip", "racetrac", "race trac",
+    "kum & go", "kwik trip", "kwiktrip", "racetrac", "race trac", "tom thumb",
+    "kulsum", "speedy shop",
   ];
   const convRegex = convKeywords.map((k) => new RegExp(k, "i"));
 
