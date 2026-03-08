@@ -79,6 +79,28 @@ export type NetWorthSnapshotResult = {
   accounts: NetWorthSnapshotAccount[];
 };
 
+export type MerchantSpendRow = {
+  name: string;
+  totalSpend: number;
+  count: number;
+  avgTransaction: number;
+  lastDate: string;
+  category: string;
+};
+
+export type MerchantSpendSummary = {
+  totalMerchants: number;
+  totalSpend: number;
+  avgPerMerchant: number;
+  topCategory: string;
+};
+
+export type MerchantSpendResult = {
+  merchants: MerchantSpendRow[];
+  summary: MerchantSpendSummary;
+  categories: string[];
+};
+
 function toMonthBounds(month?: string) {
   const now = new Date();
   const parsed = month && /^\d{4}-\d{2}$/.test(month)
@@ -1123,6 +1145,120 @@ export async function getCategories() {
 export async function getDistinctCategories() {
   const db = await getDb();
   return db.collection("transactions").distinct("category");
+}
+
+export async function getMerchantSpend(month?: string, category?: string): Promise<MerchantSpendResult> {
+  const db = await getDb();
+
+  const filter: Record<string, unknown> = {
+    amount: { $lt: 0 },
+    category: { $ne: "Transfer" },
+    description: { $nin: [null, ""] },
+  };
+
+  if (month) {
+    const { start, end } = toMonthBounds(month);
+    filter.date = { $gte: start, $lt: end };
+  }
+
+  if (category) {
+    filter.category = category;
+  }
+
+  type MerchantAggregateRow = {
+    name: string;
+    totalSpend: number;
+    count: number;
+    avgTransaction: number;
+    lastDate: Date | string;
+    category: string;
+  };
+
+  type CountRow = { _id: null; total: number };
+  type CategoryRow = { _id: string; total: number };
+
+  const merchantPipeline = [
+    { $match: filter },
+    {
+      $group: {
+        _id: { name: "$description", category: "$category" },
+        totalSpend: { $sum: { $abs: "$amount" } },
+        count: { $sum: 1 },
+        lastDate: { $max: "$date" },
+      },
+    },
+    {
+      $sort: {
+        "_id.name": 1,
+        totalSpend: -1,
+      },
+    },
+    {
+      $group: {
+        _id: "$_id.name",
+        totalSpend: { $sum: "$totalSpend" },
+        count: { $sum: "$count" },
+        lastDate: { $max: "$lastDate" },
+        topCategory: { $first: "$_id.category" },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        name: "$_id",
+        totalSpend: { $round: ["$totalSpend", 2] },
+        count: 1,
+        avgTransaction: {
+          $round: [{ $divide: ["$totalSpend", "$count"] }, 2],
+        },
+        lastDate: 1,
+        category: { $ifNull: ["$topCategory", "Uncategorized"] },
+      },
+    },
+    { $sort: { totalSpend: -1, count: -1, name: 1 } },
+    { $limit: 20 },
+  ];
+
+  const [merchants, totalMerchantsRows, totalSpendRows, categoryRows, categories] = await Promise.all([
+    db.collection("transactions").aggregate<MerchantAggregateRow>(merchantPipeline).toArray(),
+    db.collection("transactions").aggregate<CountRow>([
+      { $match: filter },
+      { $group: { _id: "$description" } },
+      { $count: "total" },
+    ]).toArray(),
+    db.collection("transactions").aggregate<CountRow>([
+      { $match: filter },
+      { $group: { _id: null, total: { $sum: { $abs: "$amount" } } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate<CategoryRow>([
+      { $match: filter },
+      { $group: { _id: "$category", total: { $sum: { $abs: "$amount" } } } },
+      { $sort: { total: -1 } },
+    ]).toArray(),
+    db.collection("transactions").distinct("category", { amount: { $lt: 0 }, category: { $ne: "Transfer" } }),
+  ]);
+
+  const totalMerchants = totalMerchantsRows[0]?.total || 0;
+  const totalSpend = Number((totalSpendRows[0]?.total || 0).toFixed(2));
+  const avgPerMerchant = totalMerchants > 0 ? Number((totalSpend / totalMerchants).toFixed(2)) : 0;
+  const topCategory = categoryRows.find((row) => row._id)?. _id || "Uncategorized";
+
+  return {
+    merchants: merchants.map((merchant) => ({
+      ...merchant,
+      lastDate: merchant.lastDate ? new Date(merchant.lastDate).toISOString() : "",
+      category: merchant.category || "Uncategorized",
+    })),
+    summary: {
+      totalMerchants,
+      totalSpend,
+      avgPerMerchant,
+      topCategory,
+    },
+    categories: (categories as string[])
+      .filter((value): value is string => Boolean(value))
+      .sort((a, b) => a.localeCompare(b)),
+  };
 }
 
 export async function getDistinctAccounts() {
