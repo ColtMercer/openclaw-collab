@@ -101,6 +101,51 @@ export type MerchantSpendResult = {
   categories: string[];
 };
 
+export type SpendingForecastCategory = {
+  category: string;
+  actualToDate: number;
+  avgDaily: number;
+  projected: number;
+  percentOfTotal: number;
+};
+
+export type SpendingForecastResult = {
+  month: string;
+  totalSoFar: number;
+  projectedTotal: number;
+  lastMonthTotal: number;
+  projectedVsLastMonthPct: number | null;
+  daysElapsed: number;
+  daysInMonth: number;
+  topCategories: SpendingForecastCategory[];
+};
+
+export type DayOfWeekSpendingDay = {
+  day: string;
+  avg: number;
+  total: number;
+  count: number;
+};
+
+export type DayOfWeekSpendingCategory = {
+  category: string;
+  total: number;
+  avg: number;
+  count: number;
+};
+
+export type DayOfWeekSpendingResult = {
+  dateRange: {
+    start: string;
+    end: string;
+  };
+  totalTransactionsAnalyzed: number;
+  days: DayOfWeekSpendingDay[];
+  mostExpensiveDay: DayOfWeekSpendingDay | null;
+  cheapestDay: DayOfWeekSpendingDay | null;
+  topCategoriesForMostExpensiveDay: DayOfWeekSpendingCategory[];
+};
+
 function toMonthBounds(month?: string) {
   const now = new Date();
   const parsed = month && /^\d{4}-\d{2}$/.test(month)
@@ -3047,4 +3092,156 @@ export async function getAPIUsageSpikeData() {
   const totalApiSpend = monthlyBreakdown.reduce((sum, row) => sum + row.total, 0);
 
   return { vendors, monthlyBreakdown, totalApiSpend, latestMonth };
+}
+
+export async function getSpendingForecast(): Promise<SpendingForecastResult> {
+  const db = await getDb();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const previousStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousEnd = start;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const daysElapsed = now.getDate();
+
+  type TotalRow = { total?: number };
+  type CategoryRow = { _id: string; total: number; count: number };
+
+  const baseMatch = { amount: { $lt: 0 }, category: { $nin: ["Transfer", null, ""] } };
+
+  const [currentMonthRows, lastMonthRows, categoryRows] = await Promise.all([
+    db.collection("transactions").aggregate<TotalRow>([
+      { $match: { ...baseMatch, date: { $gte: start, $lt: end } } },
+      { $group: { _id: null, total: { $sum: { $abs: "$amount" } } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate<TotalRow>([
+      { $match: { ...baseMatch, date: { $gte: previousStart, $lt: previousEnd } } },
+      { $group: { _id: null, total: { $sum: { $abs: "$amount" } } } },
+    ]).toArray(),
+    db.collection("transactions").aggregate<CategoryRow>([
+      { $match: { ...baseMatch, date: { $gte: start, $lt: end } } },
+      { $group: { _id: "$category", total: { $sum: { $abs: "$amount" } }, count: { $sum: 1 } } },
+      { $sort: { total: -1 } },
+      { $limit: 5 },
+    ]).toArray(),
+  ]);
+
+  const totalSoFar = currentMonthRows[0]?.total || 0;
+  const lastMonthTotal = lastMonthRows[0]?.total || 0;
+  const projectedTotal = daysElapsed > 0 ? (totalSoFar / daysElapsed) * daysInMonth : 0;
+  const projectedVsLastMonthPct = lastMonthTotal > 0
+    ? ((projectedTotal - lastMonthTotal) / lastMonthTotal) * 100
+    : null;
+
+  const topCategories = categoryRows.map((row) => ({
+    category: row._id,
+    actualToDate: row.total,
+    avgDaily: daysElapsed > 0 ? row.total / daysElapsed : 0,
+    projected: daysElapsed > 0 ? (row.total / daysElapsed) * daysInMonth : 0,
+    percentOfTotal: totalSoFar > 0 ? (row.total / totalSoFar) * 100 : 0,
+  }));
+
+  return {
+    month: start.toLocaleDateString("en-US", { month: "long", year: "numeric" }),
+    totalSoFar,
+    projectedTotal,
+    lastMonthTotal,
+    projectedVsLastMonthPct,
+    daysElapsed,
+    daysInMonth,
+    topCategories,
+  };
+}
+
+export async function getDayOfWeekSpending(): Promise<DayOfWeekSpendingResult> {
+  const db = await getDb();
+  const end = new Date();
+  const start = new Date(end);
+  start.setMonth(start.getMonth() - 6);
+
+  type DayRow = {
+    _id: number;
+    total: number;
+    count: number;
+    avg: number;
+  };
+
+  type CategoryRow = {
+    _id: string;
+    total: number;
+    count: number;
+    avg: number;
+  };
+
+  const match = {
+    date: { $gte: start, $lte: end },
+    amount: { $lt: 0 },
+    category: { $nin: ["Transfer", null, ""] },
+  };
+
+  const dayRows = await db.collection("transactions").aggregate<DayRow>([
+    { $match: match },
+    {
+      $group: {
+        _id: { $isoDayOfWeek: "$date" },
+        total: { $sum: { $abs: "$amount" } },
+        count: { $sum: 1 },
+        avg: { $avg: { $abs: "$amount" } },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]).toArray();
+
+  const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const days = dayNames.map((day, index) => {
+    const row = dayRows.find((entry) => entry._id === index + 1);
+    return {
+      day,
+      avg: row?.avg || 0,
+      total: row?.total || 0,
+      count: row?.count || 0,
+    };
+  });
+
+  const nonZeroDays = days.filter((day) => day.count > 0);
+  const mostExpensiveDay = nonZeroDays.length > 0 ? [...nonZeroDays].sort((a, b) => b.avg - a.avg)[0] : null;
+  const cheapestDay = nonZeroDays.length > 0 ? [...nonZeroDays].sort((a, b) => a.avg - b.avg)[0] : null;
+
+  const topCategoriesForMostExpensiveDay = mostExpensiveDay
+    ? await db.collection("transactions").aggregate<CategoryRow>([
+      {
+        $match: {
+          ...match,
+          $expr: { $eq: [{ $isoDayOfWeek: "$date" }, dayNames.indexOf(mostExpensiveDay.day) + 1] },
+        },
+      },
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: { $abs: "$amount" } },
+          count: { $sum: 1 },
+          avg: { $avg: { $abs: "$amount" } },
+        },
+      },
+      { $sort: { total: -1 } },
+      { $limit: 5 },
+    ]).toArray()
+    : [];
+
+  return {
+    dateRange: {
+      start: start.toISOString(),
+      end: end.toISOString(),
+    },
+    totalTransactionsAnalyzed: days.reduce((sum, day) => sum + day.count, 0),
+    days,
+    mostExpensiveDay,
+    cheapestDay,
+    topCategoriesForMostExpensiveDay: topCategoriesForMostExpensiveDay.map((row) => ({
+      category: row._id,
+      total: row.total,
+      avg: row.avg,
+      count: row.count,
+    })),
+  };
 }

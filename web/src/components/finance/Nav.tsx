@@ -24,6 +24,7 @@ const sections = [
       { href: "/finance/subscription-audit", label: "Subscription Audit", icon: "🔍" },
       { href: "/finance/subscription-escalations", label: "Sub Escalations", icon: "🚨" },
       { href: "/finance/new-recurring", label: "New Recurring", icon: "🚨" },
+      { href: "/finance/forecast", label: "Forecast", icon: "🔮" },
     ],
   },
   {
@@ -33,6 +34,7 @@ const sections = [
       { href: "/finance/anomalies", label: "Anomalies", icon: "🚨" },
       { href: "/finance/velocity", label: "Spending Velocity", icon: "🔥" },
       { href: "/finance/heatmap", label: "Spending Heatmap", icon: "🗓️" },
+      { href: "/finance/day-of-week", label: "Day of Week", icon: "📅" },
       { href: "/finance/cash-flow-calendar", label: "Cash Flow Calendar", icon: "💵" },
       { href: "/finance/merchants", label: "Merchant Spend", icon: "🏪" },
       { href: "/finance/restaurants", label: "Restaurants", icon: "🍽️" },
