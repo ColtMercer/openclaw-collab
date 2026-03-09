@@ -35,6 +35,7 @@ const sections = [
       { href: "/finance/velocity", label: "Spending Velocity", icon: "🔥" },
       { href: "/finance/heatmap", label: "Spending Heatmap", icon: "🗓️" },
       { href: "/finance/day-of-week", label: "Day of Week", icon: "📅" },
+      { href: "/finance/weekend-vs-weekday", label: "Weekend vs Weekday", icon: "🗓️" },
       { href: "/finance/monthly-trends", label: "Monthly Trends", icon: "📈" },
       { href: "/finance/cash-flow-calendar", label: "Cash Flow Calendar", icon: "💵" },
       { href: "/finance/merchants", label: "Merchant Spend", icon: "🏪" },

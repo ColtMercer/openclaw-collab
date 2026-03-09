@@ -146,6 +146,26 @@ export type DayOfWeekSpendingResult = {
   topCategoriesForMostExpensiveDay: DayOfWeekSpendingCategory[];
 };
 
+export type WeekendVsWeekdayCategory = {
+  category: string;
+  weekdayAvg: number;
+  weekendAvg: number;
+  weekdayCount: number;
+  weekendCount: number;
+};
+
+export type WeekendVsWeekdayResult = {
+  avgWeekdaySpendPerDay: number;
+  avgWeekendSpendPerDay: number;
+  weekendToWeekdayRatio: number;
+  topCategories: WeekendVsWeekdayCategory[];
+  totalTransactions: number;
+  dateRange: {
+    start: string;
+    end: string;
+  };
+};
+
 function toMonthBounds(month?: string) {
   const now = new Date();
   const parsed = month && /^\d{4}-\d{2}$/.test(month)
@@ -3243,5 +3263,150 @@ export async function getDayOfWeekSpending(): Promise<DayOfWeekSpendingResult> {
       avg: row.avg,
       count: row.count,
     })),
+  };
+}
+
+export async function getWeekendVsWeekdaySpending(): Promise<WeekendVsWeekdayResult> {
+  const db = await getDb();
+  const end = new Date();
+  const start = new Date(end);
+  start.setMonth(start.getMonth() - 3);
+
+  type SummaryRow = {
+    _id: "weekday" | "weekend";
+    total: number;
+    count: number;
+    uniqueDays: number;
+  };
+
+  type CategoryRow = {
+    _id: string;
+    weekdayTotal: number;
+    weekendTotal: number;
+    weekdayCount: number;
+    weekendCount: number;
+  };
+
+  const match = {
+    date: { $gte: start, $lte: end },
+    amount: { $lt: 0 },
+    category: { $nin: ["Transfer", null, ""] },
+  };
+
+  const summaryRows = await db.collection("transactions").aggregate<SummaryRow>([
+    { $match: match },
+    {
+      $project: {
+        spend: { $abs: "$amount" },
+        bucket: {
+          $cond: [
+            { $in: [{ $dayOfWeek: "$date" }, [1, 7]] },
+            "weekend",
+            "weekday",
+          ],
+        },
+        dayKey: {
+          $dateToString: {
+            format: "%Y-%m-%d",
+            date: "$date",
+          },
+        },
+      },
+    },
+    {
+      $group: {
+        _id: "$bucket",
+        total: { $sum: "$spend" },
+        count: { $sum: 1 },
+        uniqueDays: { $addToSet: "$dayKey" },
+      },
+    },
+    {
+      $project: {
+        total: 1,
+        count: 1,
+        uniqueDays: { $size: "$uniqueDays" },
+      },
+    },
+  ]).toArray();
+
+  const weekdaySummary = summaryRows.find((row) => row._id === "weekday");
+  const weekendSummary = summaryRows.find((row) => row._id === "weekend");
+
+  const avgWeekdaySpendPerDay = weekdaySummary && weekdaySummary.uniqueDays > 0
+    ? weekdaySummary.total / weekdaySummary.uniqueDays
+    : 0;
+  const avgWeekendSpendPerDay = weekendSummary && weekendSummary.uniqueDays > 0
+    ? weekendSummary.total / weekendSummary.uniqueDays
+    : 0;
+
+  const topCategories = await db.collection("transactions").aggregate<CategoryRow>([
+    { $match: match },
+    {
+      $group: {
+        _id: "$category",
+        weekdayTotal: {
+          $sum: {
+            $cond: [
+              { $in: [{ $dayOfWeek: "$date" }, [2, 3, 4, 5, 6]] },
+              { $abs: "$amount" },
+              0,
+            ],
+          },
+        },
+        weekendTotal: {
+          $sum: {
+            $cond: [
+              { $in: [{ $dayOfWeek: "$date" }, [1, 7]] },
+              { $abs: "$amount" },
+              0,
+            ],
+          },
+        },
+        weekdayCount: {
+          $sum: {
+            $cond: [
+              { $in: [{ $dayOfWeek: "$date" }, [2, 3, 4, 5, 6]] },
+              1,
+              0,
+            ],
+          },
+        },
+        weekendCount: {
+          $sum: {
+            $cond: [
+              { $in: [{ $dayOfWeek: "$date" }, [1, 7]] },
+              1,
+              0,
+            ],
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        combinedTotal: { $add: ["$weekdayTotal", "$weekendTotal"] },
+      },
+    },
+    { $sort: { combinedTotal: -1 } },
+    { $limit: 5 },
+  ]).toArray();
+
+  return {
+    avgWeekdaySpendPerDay,
+    avgWeekendSpendPerDay,
+    weekendToWeekdayRatio: avgWeekdaySpendPerDay > 0 ? avgWeekendSpendPerDay / avgWeekdaySpendPerDay : 0,
+    topCategories: topCategories.map((row) => ({
+      category: row._id,
+      weekdayAvg: row.weekdayCount > 0 ? row.weekdayTotal / row.weekdayCount : 0,
+      weekendAvg: row.weekendCount > 0 ? row.weekendTotal / row.weekendCount : 0,
+      weekdayCount: row.weekdayCount,
+      weekendCount: row.weekendCount,
+    })),
+    totalTransactions: (weekdaySummary?.count || 0) + (weekendSummary?.count || 0),
+    dateRange: {
+      start: start.toISOString(),
+      end: end.toISOString(),
+    },
   };
 }
