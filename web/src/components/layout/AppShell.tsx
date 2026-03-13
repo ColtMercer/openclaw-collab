@@ -15,6 +15,7 @@ const navItems = [
   { href: "/", label: "Kanban" },
   { href: "/activity", label: "Activity" },
   { href: "/articles", label: "Articles" },
+  { href: "/research", label: "Research" },
   { href: "/finance", label: "Finance" },
   { href: "/shopper", label: "Shopper" },
   { href: "/social", label: "Social" },

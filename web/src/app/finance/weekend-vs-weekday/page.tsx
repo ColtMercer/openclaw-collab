@@ -6,6 +6,17 @@ export const dynamic = "force-dynamic";
 
 export default async function WeekendVsWeekdayPage() {
   const data = await getWeekendVsWeekdaySpending();
+  const ratioValue = data.weekendToWeekdayRatio > 0 ? `${data.weekendToWeekdayRatio.toFixed(1)}×` : "—";
+  const ratioSubtitle = data.weekendToWeekdayRatio > 1
+    ? "more on weekends"
+    : data.weekendToWeekdayRatio > 0
+      ? "less on weekends"
+      : "No weekday baseline";
+  const ratioDescription = data.weekendToWeekdayRatio > 1
+    ? `${data.weekendToWeekdayRatio.toFixed(1)}× more on weekends`
+    : data.weekendToWeekdayRatio > 0
+      ? `${data.weekendToWeekdayRatio.toFixed(1)}× weekend spend vs weekday`
+      : "No weekday baseline";
   const ratioClassName = data.weekendToWeekdayRatio > 1
     ? "border-amber-500/30"
     : data.weekendToWeekdayRatio > 0
@@ -27,7 +38,7 @@ export default async function WeekendVsWeekdayPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Card title="Avg Weekday Spend / Day" value={formatCurrency(data.avgWeekdaySpendPerDay)} subtitle="Monday through Friday" className="border-indigo-500/30" />
         <Card title="Avg Weekend Spend / Day" value={formatCurrency(data.avgWeekendSpendPerDay)} subtitle="Saturday and Sunday" className="border-indigo-500/30" />
-        <Card title="Weekend vs Weekday" value={`${data.weekendToWeekdayRatio.toFixed(1)}×`} subtitle={data.weekendToWeekdayRatio > 1 ? "more on weekends" : data.weekendToWeekdayRatio > 0 ? "less on weekends" : "No weekday baseline"} className={ratioClassName} />
+        <Card title="Weekend vs Weekday" value={ratioValue} subtitle={ratioSubtitle} className={ratioClassName} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -35,9 +46,7 @@ export default async function WeekendVsWeekdayPage() {
         <Card title="Date Range" value={formatDate(data.dateRange.start)} subtitle={`to ${formatDate(data.dateRange.end)}`} />
         <div className={`bg-[#141420] border border-[#27272a] rounded-xl p-5 sm:col-span-2 ${ratioClassName}`}>
           <p className="text-sm text-zinc-400 mb-1">Weekend Multiplier</p>
-          <p className={`text-2xl font-bold tracking-tight ${ratioTextClassName}`}>
-            {data.weekendToWeekdayRatio.toFixed(1)}× {data.weekendToWeekdayRatio > 1 ? "more on weekends" : data.weekendToWeekdayRatio > 0 ? "on weekdays than weekends" : "vs weekdays"}
-          </p>
+          <p className={`text-2xl font-bold tracking-tight ${ratioTextClassName}`}>{ratioDescription}</p>
           <p className="text-xs text-zinc-500 mt-1">Based on average spend per day across weekend and weekday dates with spending.</p>
         </div>
       </div>
